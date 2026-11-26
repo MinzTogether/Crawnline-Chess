@@ -9,6 +9,7 @@ import {
   type EvalScore,
   type MoveClassification,
 } from '../types/chess';
+import type { PieceStyleId } from '../types/preferences';
 import { evalToBarPercent, formatEvalScore } from '../engine/uciParser';
 import { ChessPiece } from './ChessPieces';
 
@@ -28,6 +29,7 @@ interface ChessBoardProps {
   fen: string;
   orientation: Color;
   themeId: BoardThemeId;
+  pieceStyle?: PieceStyleId;
   interactive: boolean;
   allowedTurn?: Color | 'both';
   lastMove?: { from: Square; to: Square; classification?: MoveClassification } | null;
@@ -51,6 +53,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   fen,
   orientation,
   themeId,
+  pieceStyle = 'classic',
   interactive,
   allowedTurn = 'both',
   lastMove,
@@ -402,7 +405,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                         isLastTo ? 'animate-piece-pop' : ''
                       }`}
                     >
-                      <ChessPiece type={piece.type} color={piece.color} />
+                      <ChessPiece type={piece.type} color={piece.color} pieceStyle={pieceStyle} />
                     </div>
                   )}
 
@@ -483,7 +486,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
             className="absolute pointer-events-none z-30 w-[13%] h-[13%] -translate-x-1/2 -translate-y-1/2"
             style={{ left: dragPos.x, top: dragPos.y }}
           >
-            <ChessPiece type={draggedPiece.type} color={draggedPiece.color} />
+            <ChessPiece type={draggedPiece.type} color={draggedPiece.color} pieceStyle={pieceStyle} />
           </div>
         )}
 
@@ -493,9 +496,9 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
             <div
               role="dialog"
               aria-label="Choose promotion piece"
-              className="bg-[#242321] border border-white/15 rounded-xl p-4 shadow-2xl flex flex-col items-center gap-3"
+              className="bg-[var(--app-surface)] border border-[var(--app-border-strong)] rounded-xl p-4 shadow-2xl flex flex-col items-center gap-3"
             >
-              <span className="text-sm font-semibold text-[#F1EFEA]">Promote Pawn</span>
+              <span className="text-sm font-semibold text-[var(--app-text)]">Promote Pawn</span>
               <div className="flex items-center gap-2">
                 {(['q', 'r', 'b', 'n'] as PieceSymbol[]).map((promo) => (
                   <button
@@ -506,16 +509,16 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                       onMove(pendingPromotion.from, pendingPromotion.to, promo);
                       setPendingPromotion(null);
                     }}
-                    className="w-14 h-14 rounded-lg bg-[#312F2C] hover:bg-[#81B64C]/25 border border-white/10 hover:border-[#81B64C] p-1.5 transition-colors cursor-pointer"
+                    className="w-14 h-14 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-accent-soft)] border border-[var(--app-border)] hover:border-[var(--app-accent)] p-1.5 transition-colors cursor-pointer"
                   >
-                    <ChessPiece type={promo} color={pendingPromotion.color} />
+                    <ChessPiece type={promo} color={pendingPromotion.color} pieceStyle={pieceStyle} />
                   </button>
                 ))}
               </div>
               <button
                 type="button"
                 onClick={() => setPendingPromotion(null)}
-                className="text-xs text-[#A5A29B] hover:text-white transition-colors cursor-pointer"
+                className="text-xs text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
               >
                 Cancel
               </button>

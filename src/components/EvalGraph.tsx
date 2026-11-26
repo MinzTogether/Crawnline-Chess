@@ -9,10 +9,6 @@ interface EvalGraphProps {
   liveEval?: EvalScore | null;
 }
 
-/**
- * Interactive SVG Advantage Chart (Chess.com Game Review style).
- * Plots Stockfish's White win-probability curve across all plies.
- */
 export const EvalGraph: React.FC<EvalGraphProps> = ({ moves, viewPly, onSelectPly, liveEval }) => {
   const width = 320;
   const height = 74;
@@ -57,9 +53,9 @@ export const EvalGraph: React.FC<EvalGraphProps> = ({ moves, viewPly, onSelectPl
   const activePoint = coords[Math.min(viewPly, coords.length - 1)];
 
   return (
-    <div className="bg-[#1C1B19] border border-white/[0.07] rounded-lg px-2.5 py-2">
-      <div className="flex items-center justify-between text-[11px] text-[#9E9B94] mb-1">
-        <span className="font-medium text-[#C8C5BC]">Advantage Graph</span>
+    <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-lg px-2.5 py-2">
+      <div className="flex items-center justify-between text-[11px] text-[var(--app-text-muted)] mb-1">
+        <span className="font-medium text-[var(--app-text)]">Advantage Graph</span>
         <span className="font-mono tabular-nums">
           {activePoint?.score ? formatEvalScore(activePoint.score) : activePoint?.label ?? '0.0'}
         </span>
@@ -77,11 +73,9 @@ export const EvalGraph: React.FC<EvalGraphProps> = ({ moves, viewPly, onSelectPl
           onSelectPly(targetPly);
         }}
       >
-        {/* Background: dark top half, lighter neutral bottom half */}
         <rect x={padX} y={padY} width={usableW} height={usableH} rx="3" fill="#2A2926" />
         {areaPath && <path d={areaPath} fill="#E7E4DC" fillOpacity="0.88" />}
 
-        {/* Equal 0.0 midline */}
         <line
           x1={padX}
           y1={midY}
@@ -93,12 +87,10 @@ export const EvalGraph: React.FC<EvalGraphProps> = ({ moves, viewPly, onSelectPl
           opacity="0.7"
         />
 
-        {/* Curve stroke */}
         {coords.length > 1 && (
           <path d={linePath} fill="none" stroke="#81B64C" strokeWidth="1.75" strokeLinejoin="round" />
         )}
 
-        {/* Active ply indicator */}
         {activePoint && (
           <>
             <line

@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 import type { Color, PieceSymbol, Square } from 'chess.js';
-import { ArrowUpDown, Pause, Plus, Volume2, VolumeX } from 'lucide-react';
+import { ArrowUpDown, Home, Pause, Plus, Settings, Volume2, VolumeX } from 'lucide-react';
 import {
   STOCKFISH_LEVELS,
   TIME_CONTROLS,
   type AppState,
   type BoardArrow,
-  type BoardThemeId,
   type ClassicStudy,
   type EngineAnalysis,
   type EvalScore,
@@ -15,15 +14,28 @@ import {
   type MatchSettings,
   type MoveRecord,
 } from './types/chess';
+import {
+  loadPreferences,
+  loadProfile,
+  loadSavedMatches,
+  saveMatches,
+  savePreferences,
+  saveProfile,
+  type AppPreferences,
+  type SavedMatch,
+  type UserProfile,
+} from './types/preferences';
 import { StockfishAnalyzer, StockfishOpponent } from './engine/stockfishService';
+import { buildMatchRatingReport } from './engine/matchRating';
 import { calculateAverageAccuracy, classifyMove } from './engine/uciParser';
 import { buildPgn, evaluateGameTermination, getMaterialSummary, parsePgnOrFen } from './game/chessLogic';
 import { detectOpening } from './game/openings';
 import { playChessSound } from './utils/sound';
+import { AppLogoIcon, syncBrowserFavicon } from './components/AppIcons';
 import { ChessBoard } from './components/ChessBoard';
 import { PlayerBar } from './components/PlayerBar';
 import { RightPanel, type RightPanelTab } from './components/RightPanel';
-import { TitleScreen } from './components/TitleScreen';
+import { MainHub, type HubSection } from './components/MainHub';
 import { GameOverModal, NewMatchModal, PauseModal } from './components/GameModals';
 
 const INITIAL_FEN = new Chess().fen();
@@ -39,6 +51,12 @@ function getAutostartFlag(): boolean {
 }
 
 export default function App() {
+  // Persisted Preferences, Profile, and Saved Match Archive
+  const [preferences, setPreferences] = useState<AppPreferences>(() => loadPreferences());
+  const [profile, setProfile] = useState<UserProfile>(() => loadProfile());
+  const [savedMatches, setSavedMatches] = useState<SavedMatch[]>(() => loadSavedMatches());
+  const [hubSection, setHubSection] = useState<HubSection>('home');
+
   const [matchSettings, setMatchSettings] = useState<MatchSettings>({
     mode: 'stockfish',
     playerSide: 'w',
@@ -58,6 +76,7 @@ export default function App() {
   const [orientation, setOrientation] = useState<Color>('w');
   const [activeMode, setActiveMode] = useState<GameMode>('stockfish');
   const [positionLabel, setPositionLabel] = useState<string | null>(null);
+  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
 
   // Termination flags
   const [resignedBy, setResignedBy] = useState<Color | null>(null);
@@ -69,45 +88,59 @@ export default function App() {
   const [blackClock, setBlackClock] = useState<number | null>(600);
   const [incrementSec, setIncrementSec] = useState<number>(0);
 
-  // UI & Board Preferences
+  // Arena UI State
   const [rightTab, setRightTab] = useState<RightPanelTab>('moves');
-  const [boardTheme, setBoardTheme] = useState<BoardThemeId>('tournament');
-  const [showCoordinates, setShowCoordinates] = useState(true);
-  const [showLegalMoves, setShowLegalMoves] = useState(true);
-  const [showEvalBar, setShowEvalBar] = useState(true);
   const [showBestArrow, setShowBestArrow] = useState(false);
   const [hintArrow, setHintArrow] = useState<BoardArrow | null>(null);
-  const [muted, setMuted] = useState(false);
 
   // Stockfish Engine State
   const [engineEnabled, setEngineEnabled] = useState(true);
-  const [multiPv, setMultiPv] = useState(3);
-  const [analysisDepth, setAnalysisDepth] = useState(16);
   const [engineAnalysis, setEngineAnalysis] = useState<EngineAnalysis | null>(null);
   const [isBotThinking, setIsBotThinking] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewProgress, setReviewProgress] = useState(0);
 
-  // Dedicated Stockfish Web Workers
   const analyzerRef = useRef<StockfishAnalyzer | null>(null);
   const opponentRef = useRef<StockfishOpponent | null>(null);
   const latestAnalysisRef = useRef<EngineAnalysis | null>(null);
+  const archivedMatchRef = useRef<string | null>(null);
+
+  // Apply App Theme & Browser Favicon whenever preferences change
+  useEffect(() => {
+    document.documentElement.dataset.appTheme = preferences.appTheme;
+    syncBrowserFavicon(preferences.appIcon);
+    savePreferences(preferences);
+  }, [preferences]);
+
+  useEffect(() => {
+    saveProfile(profile);
+  }, [profile]);
+
+  useEffect(() => {
+    saveMatches(savedMatches);
+  }, [savedMatches]);
 
   useEffect(() => {
     latestAnalysisRef.current = engineAnalysis;
   }, [engineAnalysis]);
 
-  // Keep body data-state synchronized with the game state machine
   useEffect(() => {
     document.body.dataset.state = appState;
   }, [appState]);
 
-  // Initialize workers lazily when leaving title screen and clean up on unmount
   useEffect(() => {
     return () => {
       analyzerRef.current?.terminate();
       opponentRef.current?.terminate();
     };
+  }, []);
+
+  const updatePreferences = useCallback((patch: Partial<AppPreferences>) => {
+    setPreferences((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const updateProfile = useCallback((patch: Partial<UserProfile>) => {
+    setProfile((prev) => ({ ...prev, ...patch }));
   }, []);
 
   const ensureAnalyzer = useCallback(() => {
@@ -153,6 +186,8 @@ export default function App() {
     return detectOpening(sanList);
   }, [moves, viewPly]);
 
+  const fullGameOpening = useMemo(() => detectOpening(moves.map((m) => m.san)), [moves]);
+
   const material = useMemo(() => getMaterialSummary(viewedFen), [viewedFen]);
 
   const whiteAccuracy = useMemo(
@@ -171,12 +206,62 @@ export default function App() {
     [moves]
   );
 
+  // Player display names
+  const whiteName =
+    activeMode === 'stockfish'
+      ? humanColor === 'w'
+        ? profile.displayName
+        : `Stockfish (${activeLevel.name})`
+      : activeMode === 'analysis'
+        ? 'White'
+        : `${profile.displayName} (W)`;
+
+  const blackName =
+    activeMode === 'stockfish'
+      ? humanColor === 'b'
+        ? profile.displayName
+        : `Stockfish (${activeLevel.name})`
+      : activeMode === 'analysis'
+        ? 'Black'
+        : 'Player 2 (B)';
+
+  const whiteSubtitle =
+    activeMode === 'stockfish'
+      ? humanColor === 'w'
+        ? 'White'
+        : `${activeLevel.elo} Elo`
+      : activeMode === 'analysis'
+        ? 'Analysis'
+        : '';
+
+  const blackSubtitle =
+    activeMode === 'stockfish'
+      ? humanColor === 'b'
+        ? 'Black'
+        : `${activeLevel.elo} Elo`
+      : activeMode === 'analysis'
+        ? 'Analysis'
+        : '';
+
+  const pgnText = useMemo(
+    () =>
+      buildPgn({
+        initialFen,
+        moves,
+        whiteName,
+        blackName,
+        result: termination.resultString,
+      }),
+    [initialFen, moves, whiteName, blackName, termination.resultString]
+  );
+
   // Start / Restart a match
   const startMatch = useCallback(
     (customSettings?: MatchSettings) => {
       const cfg = customSettings ?? matchSettings;
       const tc = TIME_CONTROLS.find((t) => t.id === cfg.timeControlId) ?? TIME_CONTROLS[4];
       const chosenSide = cfg.mode === 'stockfish' ? resolvePlayerColor(cfg.playerSide) : 'w';
+      const newMatchId = `match-${Date.now()}`;
 
       opponentRef.current?.cancel();
       analyzerRef.current?.stop();
@@ -186,6 +271,8 @@ export default function App() {
       setOrientation(chosenSide);
       setInitialFen(INITIAL_FEN);
       setPositionLabel(null);
+      setActiveMatchId(newMatchId);
+      archivedMatchRef.current = null;
       setMoves([]);
       setViewPly(0);
       setResignedBy(null);
@@ -209,9 +296,8 @@ export default function App() {
         setIncrementSec(tc.incrementSeconds);
       }
 
-      // Default Best Move arrow ON in Analysis mode, OFF during competitive games
       setShowBestArrow(cfg.mode === 'analysis');
-      setRightTab(cfg.mode === 'analysis' ? 'engine' : 'moves');
+      setRightTab(cfg.mode === 'analysis' ? 'rating' : 'moves');
       setAppState('playing');
 
       if (document.activeElement instanceof HTMLElement) {
@@ -221,13 +307,12 @@ export default function App() {
     [matchSettings]
   );
 
-  // Core move application function (used by human, Stockfish opponent, and clicking engine lines)
+  // Core move application
   const applyMove = useCallback(
     (from: Square, to: Square, promotion?: PieceSymbol): boolean => {
       if (appState !== 'playing' && activeMode !== 'analysis') return false;
       if (termination.isOver && activeMode !== 'analysis') return false;
 
-      // If user makes a move while viewing an earlier ply in analysis mode, branch cleanly from that ply
       const baseMoves = isViewingLatest ? moves : moves.slice(0, viewPly);
       const baseFen = baseMoves.length > 0 ? baseMoves[baseMoves.length - 1].fenAfter : initialFen;
 
@@ -236,18 +321,17 @@ export default function App() {
       try {
         played = game.move({ from, to, promotion: promotion ?? 'q' });
       } catch {
-        playChessSound('illegal', muted);
+        playChessSound('illegal', preferences.muted);
         return false;
       }
       if (!played) {
-        playChessSound('illegal', muted);
+        playChessSound('illegal', preferences.muted);
         return false;
       }
 
       const fenAfter = game.fen();
       const moveNum = parseInt(baseFen.split(' ')[5] || '1', 10) || Math.floor(baseMoves.length / 2) + 1;
 
-      // Capture Stockfish pre-move bestMove for instant classification if available
       const prevAnalysis = latestAnalysisRef.current;
       const bestBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.bestMoveUci ?? undefined : undefined;
       const evalBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.lines[0]?.score : undefined;
@@ -266,7 +350,6 @@ export default function App() {
         fenBefore: baseFen,
         fenAfter,
         bestMoveBefore: bestBefore,
-        // Store pre-move eval tentatively on previous move if missing
       };
 
       const nextMoves = [...baseMoves, newRecord];
@@ -281,7 +364,6 @@ export default function App() {
       setViewPly(nextMoves.length);
       setHintArrow(null);
 
-      // Add clock increment to the player who just moved
       if (incrementSec > 0 && activeMode !== 'analysis') {
         if (played.color === 'w') {
           setWhiteClock((c) => (c !== null ? c + incrementSec : null));
@@ -290,35 +372,77 @@ export default function App() {
         }
       }
 
-      // Play weight-matched procedural chess sound
       if (game.isCheckmate() || game.isDraw()) {
-        playChessSound('gameover', muted);
+        playChessSound('gameover', preferences.muted);
       } else if (game.inCheck()) {
-        playChessSound('check', muted);
+        playChessSound('check', preferences.muted);
       } else if (played.flags.includes('p')) {
-        playChessSound('promote', muted);
+        playChessSound('promote', preferences.muted);
       } else if (played.flags.includes('k') || played.flags.includes('q')) {
-        playChessSound('castle', muted);
+        playChessSound('castle', preferences.muted);
       } else if (played.captured || played.flags.includes('e')) {
-        playChessSound('capture', muted);
+        playChessSound('capture', preferences.muted);
       } else {
-        playChessSound('move', muted);
+        playChessSound('move', preferences.muted);
       }
 
       return true;
     },
-    [appState, activeMode, termination.isOver, isViewingLatest, moves, viewPly, initialFen, incrementSec, muted]
+    [
+      appState,
+      activeMode,
+      termination.isOver,
+      isViewingLatest,
+      moves,
+      viewPly,
+      initialFen,
+      incrementSec,
+      preferences.muted,
+    ]
   );
 
-  // Trigger game-over state cleanly when board reaches checkmate/draw/resign/timeout
+  // Trigger game-over state and archive completed match to Profile history
   useEffect(() => {
     if (appState === 'playing' && termination.isOver && activeMode !== 'analysis') {
       setAppState('gameover');
       setGameOverDismissed(false);
       opponentRef.current?.cancel();
       setIsBotThinking(false);
+
+      if (moves.length >= 2 && activeMatchId && archivedMatchRef.current !== activeMatchId) {
+        archivedMatchRef.current = activeMatchId;
+        const report = buildMatchRatingReport(moves);
+        const entry: SavedMatch = {
+          id: activeMatchId,
+          date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          whiteName,
+          blackName,
+          result: termination.resultString,
+          reason: termination.reason,
+          openingName: fullGameOpening ? `${fullGameOpening.eco} · ${fullGameOpening.name}` : 'Standard Game',
+          movesCount: Math.ceil(moves.length / 2),
+          pgn: pgnText,
+          whiteAccuracy: report.white.accuracy,
+          blackAccuracy: report.black.accuracy,
+          whiteGameElo: report.white.estimatedElo,
+          blackGameElo: report.black.estimatedElo,
+          userSide: activeMode === 'stockfish' ? humanColor : 'both',
+        };
+        setSavedMatches((prev) => [entry, ...prev.filter((m) => m.id !== activeMatchId)].slice(0, 25));
+      }
     }
-  }, [appState, termination.isOver, activeMode]);
+  }, [
+    appState,
+    termination,
+    activeMode,
+    moves,
+    activeMatchId,
+    whiteName,
+    blackName,
+    fullGameOpening,
+    pgnText,
+    humanColor,
+  ]);
 
   // Real-time Stockfish Analysis Worker trigger whenever viewedFen changes
   useEffect(() => {
@@ -330,10 +454,9 @@ export default function App() {
     let cancelled = false;
     const analyzer = ensureAnalyzer();
 
-    // If the viewed position is already checkmate/stalemate, don't ask Stockfish to search
     if (viewedChess.isGameOver()) {
       const mateScore: EvalScore = viewedChess.isCheckmate()
-        ? { type: 'mate', value: viewedChess.turn() === 'w' ? -0 : 0 }
+        ? { type: 'mate', value: viewedChess.turn() === 'w' ? -1 : 1 }
         : { type: 'cp', value: 0 };
       setEngineAnalysis({
         fen: viewedFen,
@@ -342,78 +465,75 @@ export default function App() {
         nps: 0,
         bestMoveUci: null,
         ponderUci: null,
-        lines: viewedChess.isCheckmate()
-          ? [
-              {
-                multipv: 1,
-                depth: 0,
-                seldepth: 0,
-                score: { type: 'mate', value: viewedChess.turn() === 'w' ? -1 : 1 },
-                nodes: 0,
-                nps: 0,
-                pvUci: [],
-                pvSan: [],
-              },
-            ]
-          : [
-              {
-                multipv: 1,
-                depth: 0,
-                seldepth: 0,
-                score: mateScore,
-                nodes: 0,
-                nps: 0,
-                pvUci: [],
-                pvSan: [],
-              },
-            ],
+        lines: [
+          {
+            multipv: 1,
+            depth: 0,
+            seldepth: 0,
+            score: mateScore,
+            nodes: 0,
+            nps: 0,
+            pvUci: [],
+            pvSan: [],
+          },
+        ],
         isSearching: false,
       });
       return;
     }
 
     analyzer
-      .analyzePosition(viewedFen, { depth: analysisDepth, multiPv }, (snapshot) => {
-        if (cancelled) return;
-        setEngineAnalysis(snapshot);
+      .analyzePosition(
+        viewedFen,
+        { depth: preferences.analysisDepth, multiPv: preferences.multiPv },
+        (snapshot) => {
+          if (cancelled) return;
+          setEngineAnalysis(snapshot);
 
-        // Once Stockfish reaches depth >= 10 on the latest move, update that move's evalAfter & classification
-        if (snapshot.depth >= 10 && snapshot.lines[0]?.score) {
-          const score = snapshot.lines[0].score;
-          setMoves((prev) => {
-            const idx = prev.findIndex((m) => m.fenAfter === snapshot.fen);
-            if (idx === -1) return prev;
-            const target = prev[idx];
-            // Only update if score changed or classification missing
-            const prevEval: EvalScore = idx > 0 && prev[idx - 1].evalAfter ? prev[idx - 1].evalAfter! : { type: 'cp', value: 20 };
-            const isBook = idx < 6 && Boolean(detectOpening(prev.slice(0, idx + 1).map((x) => x.san)));
-            const classified = classifyMove({
-              evalBefore: prevEval,
-              evalAfter: score,
-              mover: target.color,
-              playedUci: target.uci,
-              bestUci: target.bestMoveBefore,
-              isBook,
+          if (snapshot.depth >= 10 && snapshot.lines[0]?.score) {
+            const score = snapshot.lines[0].score;
+            setMoves((prev) => {
+              const idx = prev.findIndex((m) => m.fenAfter === snapshot.fen);
+              if (idx === -1) return prev;
+              const target = prev[idx];
+              const prevEval: EvalScore =
+                idx > 0 && prev[idx - 1].evalAfter ? prev[idx - 1].evalAfter! : { type: 'cp', value: 20 };
+              const isBook = idx < 6 && Boolean(detectOpening(prev.slice(0, idx + 1).map((x) => x.san)));
+              const classified = classifyMove({
+                evalBefore: prevEval,
+                evalAfter: score,
+                mover: target.color,
+                playedUci: target.uci,
+                bestUci: target.bestMoveBefore,
+                isBook,
+              });
+              const updated = [...prev];
+              updated[idx] = {
+                ...target,
+                evalAfter: score,
+                classification: classified.classification,
+                accuracy: classified.accuracy,
+              };
+              return updated;
             });
-            const updated = [...prev];
-            updated[idx] = {
-              ...target,
-              evalAfter: score,
-              classification: classified.classification,
-              accuracy: classified.accuracy,
-            };
-            return updated;
-          });
+          }
         }
-      })
-      .catch(() => {
-        // Ignore worker init errors on rapid unmount
-      });
+      )
+      .catch(() => {});
 
     return () => {
       cancelled = true;
     };
-  }, [appState, engineEnabled, isReviewing, viewedFen, viewedChess, analysisDepth, multiPv, ensureAnalyzer]);
+  }, [
+    appState,
+    engineEnabled,
+    isReviewing,
+    viewedFen,
+    viewedChess,
+    preferences.analysisDepth,
+    preferences.multiPv,
+    ensureAnalyzer,
+  ]);
 
   // Stockfish Opponent Bot Turn Execution
   useEffect(() => {
@@ -468,13 +588,12 @@ export default function App() {
     applyMove,
   ]);
 
-  // Active Match Clocks Ticker (100ms precision)
+  // Active Match Clocks Ticker
   useEffect(() => {
     if (appState !== 'playing') return;
     if (activeMode === 'analysis') return;
     if (termination.isOver) return;
     if (whiteClock === null || blackClock === null) return;
-    // Start ticking once at least one move has been played (standard Chess.com rule)
     if (moves.length === 0) return;
 
     const activeTurn = latestChess.turn();
@@ -485,7 +604,7 @@ export default function App() {
           const next = Math.max(0, prev - 0.1);
           if (next <= 0) {
             setTimeoutLoser('w');
-            playChessSound('gameover', muted);
+            playChessSound('gameover', preferences.muted);
           }
           return next;
         });
@@ -495,7 +614,7 @@ export default function App() {
           const next = Math.max(0, prev - 0.1);
           if (next <= 0) {
             setTimeoutLoser('b');
-            playChessSound('gameover', muted);
+            playChessSound('gameover', preferences.muted);
           }
           return next;
         });
@@ -503,55 +622,87 @@ export default function App() {
     }, 100);
 
     return () => window.clearInterval(timer);
-  }, [appState, activeMode, termination.isOver, whiteClock === null, blackClock === null, moves.length, latestChess, muted]);
+  }, [
+    appState,
+    activeMode,
+    termination.isOver,
+    whiteClock === null,
+    blackClock === null,
+    moves.length,
+    latestChess,
+    preferences.muted,
+  ]);
 
-  // Full Game Review using real Stockfish Worker across all plies
-  const handleRunGameReview = useCallback(async () => {
-    if (moves.length === 0 || isReviewing) return;
-    setIsReviewing(true);
-    setReviewProgress(0);
-    setRightTab('engine');
+  // Full Match Rating / Game Review pass across explicit or current moves
+  const runMatchRatingPass = useCallback(
+    async (targetInitialFen: string, targetMoves: MoveRecord[], matchIdToUpdate?: string | null) => {
+      if (targetMoves.length === 0) return;
+      setIsReviewing(true);
+      setReviewProgress(0);
+      setRightTab('rating');
 
-    const analyzer = ensureAnalyzer();
-    const snapshotMoves = [...moves];
-    const reviewed: MoveRecord[] = [...snapshotMoves];
+      const analyzer = ensureAnalyzer();
+      const reviewed: MoveRecord[] = [...targetMoves];
 
-    try {
-      // Evaluate starting position first
-      let prevResult = await analyzer.evaluateOnce(initialFen, 10);
+      try {
+        let prevResult = await analyzer.evaluateOnce(targetInitialFen, 10);
 
-      for (let i = 0; i < reviewed.length; i++) {
-        const m = reviewed[i];
-        const afterResult = await analyzer.evaluateOnce(m.fenAfter, 10);
-        const isBook = i < 6 && Boolean(detectOpening(reviewed.slice(0, i + 1).map((x) => x.san)));
+        for (let i = 0; i < reviewed.length; i++) {
+          const m = reviewed[i];
+          const afterResult = await analyzer.evaluateOnce(m.fenAfter, 10);
+          const isBook = i < 6 && Boolean(detectOpening(reviewed.slice(0, i + 1).map((x) => x.san)));
 
-        const classified = classifyMove({
-          evalBefore: prevResult.score,
-          evalAfter: afterResult.score,
-          mover: m.color,
-          playedUci: m.uci,
-          bestUci: prevResult.bestMove,
-          isBook,
-        });
+          const classified = classifyMove({
+            evalBefore: prevResult.score,
+            evalAfter: afterResult.score,
+            mover: m.color,
+            playedUci: m.uci,
+            bestUci: prevResult.bestMove,
+            isBook,
+          });
 
-        reviewed[i] = {
-          ...m,
-          bestMoveBefore: prevResult.bestMove ?? m.bestMoveBefore,
-          evalAfter: afterResult.score,
-          classification: classified.classification,
-          accuracy: classified.accuracy,
-        };
+          reviewed[i] = {
+            ...m,
+            bestMoveBefore: prevResult.bestMove ?? m.bestMoveBefore,
+            evalAfter: afterResult.score,
+            classification: classified.classification,
+            accuracy: classified.accuracy,
+          };
 
-        prevResult = afterResult;
-        setReviewProgress(Math.round(((i + 1) / reviewed.length) * 100));
-        setMoves([...reviewed]);
+          prevResult = afterResult;
+          setReviewProgress(Math.round(((i + 1) / reviewed.length) * 100));
+          setMoves([...reviewed]);
+        }
+
+        // Update saved match entry with exact Stockfish accuracy & Game Elo
+        if (matchIdToUpdate) {
+          const report = buildMatchRatingReport(reviewed);
+          setSavedMatches((prev) =>
+            prev.map((item) =>
+              item.id === matchIdToUpdate
+                ? {
+                    ...item,
+                    whiteAccuracy: report.white.accuracy,
+                    blackAccuracy: report.black.accuracy,
+                    whiteGameElo: report.white.estimatedElo,
+                    blackGameElo: report.black.estimatedElo,
+                  }
+                : item
+            )
+          );
+        }
+      } finally {
+        setIsReviewing(false);
       }
-    } finally {
-      setIsReviewing(false);
-    }
-  }, [moves, isReviewing, ensureAnalyzer, initialFen]);
+    },
+    [ensureAnalyzer]
+  );
 
-  // Hint: reveal Stockfish's best move as a glowing emerald arrow on the board
+  const handleRunGameReview = useCallback(() => {
+    if (moves.length === 0 || isReviewing) return;
+    runMatchRatingPass(initialFen, moves, activeMatchId);
+  }, [moves, isReviewing, runMatchRatingPass, initialFen, activeMatchId]);
+
   const handleRequestHint = useCallback(() => {
     const bestUci = engineAnalysis?.bestMoveUci ?? engineAnalysis?.lines[0]?.pvUci[0];
     if (bestUci && bestUci.length >= 4) {
@@ -562,7 +713,6 @@ export default function App() {
         kind: 'best',
       });
     } else {
-      // Ensure engine is enabled so it computes a hint
       setEngineEnabled(true);
       setShowBestArrow(true);
     }
@@ -577,7 +727,6 @@ export default function App() {
     setAgreedDraw(false);
     setHintArrow(null);
 
-    // Against Stockfish, take back 2 plies so it's the human's turn again (unless human just moved and bot is thinking)
     const popCount = activeMode === 'stockfish' && latestChess.turn() === humanColor && moves.length >= 2 ? 2 : 1;
     const nextMoves = moves.slice(0, Math.max(0, moves.length - popCount));
     setMoves(nextMoves);
@@ -588,7 +737,7 @@ export default function App() {
   }, [moves, activeMode, latestChess, humanColor, appState]);
 
   const handleImportPgnOrFen = useCallback(
-    (text: string, label?: string): { ok: boolean; error?: string } => {
+    (text: string, label?: string, autoRate = false): { ok: boolean; error?: string } => {
       const parsed = parsePgnOrFen(text);
       if (!parsed.ok) return parsed;
 
@@ -596,7 +745,8 @@ export default function App() {
       setIsBotThinking(false);
       setActiveMode('analysis');
       setInitialFen(parsed.initialFen);
-      setPositionLabel(label ?? (parsed.initialFen !== INITIAL_FEN ? 'Custom FEN Position' : 'Imported Game'));
+      setPositionLabel(label ?? (parsed.initialFen !== INITIAL_FEN ? 'Custom FEN Position' : 'Imported Match'));
+      setActiveMatchId(null);
       setMoves(parsed.moves);
       setViewPly(parsed.moves.length);
       setResignedBy(null);
@@ -607,22 +757,37 @@ export default function App() {
       setHintArrow(null);
       setShowBestArrow(true);
       setAppState('playing');
-      setRightTab('moves');
+      setRightTab(autoRate ? 'rating' : 'moves');
+
+      if (autoRate && parsed.moves.length > 0) {
+        window.setTimeout(() => {
+          runMatchRatingPass(parsed.initialFen, parsed.moves, null);
+        }, 50);
+      }
+
       return { ok: true };
     },
-    []
+    [runMatchRatingPass]
+  );
+
+  // Open dedicated Match Rating Analysis Mode from MainHub Home or Profile
+  const handleOpenMatchRating = useCallback(
+    (pgn?: string, title?: string) => {
+      if (pgn) {
+        handleImportPgnOrFen(pgn, title ?? 'Match Rating Review', true);
+      } else {
+        startMatch({ ...matchSettings, mode: 'analysis' });
+      }
+    },
+    [handleImportPgnOrFen, startMatch, matchSettings]
   );
 
   const handleLoadStudy = useCallback(
     (study: ClassicStudy) => {
       const payload = study.pgn ?? study.fen ?? INITIAL_FEN;
-      const res = handleImportPgnOrFen(payload, study.title);
-      if (res.ok) {
-        if (study.pgn) {
-          setRightTab('moves');
-        } else {
-          setRightTab('engine');
-        }
+      const res = handleImportPgnOrFen(payload, study.title, Boolean(study.pgn));
+      if (res.ok && !study.pgn) {
+        setRightTab('engine');
       }
     },
     [handleImportPgnOrFen]
@@ -676,13 +841,13 @@ export default function App() {
       } else if (e.key.toLowerCase() === 'h') {
         handleRequestHint();
       } else if (e.key.toLowerCase() === 'm') {
-        setMuted((m) => !m);
+        updatePreferences({ muted: !preferences.muted });
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [appState, moves.length, showNewMatchModal, handleRequestHint]);
+  }, [appState, moves.length, showNewMatchModal, handleRequestHint, updatePreferences, preferences.muted]);
 
   // Compute live Stockfish arrows for the board
   const engineArrows = useMemo<BoardArrow[]>(() => {
@@ -714,67 +879,25 @@ export default function App() {
     return arrows;
   }, [hintArrow, showBestArrow, engineAnalysis, viewedFen, activeMode]);
 
-  // Player display names
-  const whiteName =
-    activeMode === 'stockfish'
-      ? humanColor === 'w'
-        ? 'You'
-        : `Stockfish (${activeLevel.name})`
-      : activeMode === 'analysis'
-        ? 'White'
-        : 'White Player';
-
-  const blackName =
-    activeMode === 'stockfish'
-      ? humanColor === 'b'
-        ? 'You'
-        : `Stockfish (${activeLevel.name})`
-      : activeMode === 'analysis'
-        ? 'Black'
-        : 'Black Player';
-
-  const whiteSubtitle =
-    activeMode === 'stockfish'
-      ? humanColor === 'w'
-        ? 'White'
-        : `${activeLevel.elo} Elo`
-      : activeMode === 'analysis'
-        ? 'Analysis'
-        : '';
-  const blackSubtitle =
-    activeMode === 'stockfish'
-      ? humanColor === 'b'
-        ? 'Black'
-        : `${activeLevel.elo} Elo`
-      : activeMode === 'analysis'
-        ? 'Analysis'
-        : '';
-
-  const pgnText = useMemo(
-    () =>
-      buildPgn({
-        initialFen,
-        moves,
-        whiteName,
-        blackName,
-        result: termination.resultString,
-      }),
-    [initialFen, moves, whiteName, blackName, termination.resultString]
-  );
-
-  // Title Screen
+  // Main Chess.com-style Hub (Home, Settings, Profile) before choosing a play mode
   if (appState === 'title') {
     return (
-      <TitleScreen
-        settings={matchSettings}
-        boardTheme={boardTheme}
-        onChangeSettings={setMatchSettings}
-        onStart={() => startMatch()}
+      <MainHub
+        section={hubSection}
+        onChangeSection={setHubSection}
+        preferences={preferences}
+        onUpdatePreferences={updatePreferences}
+        profile={profile}
+        onUpdateProfile={updateProfile}
+        savedMatches={savedMatches}
+        matchSettings={matchSettings}
+        onChangeMatchSettings={setMatchSettings}
+        onStartMatch={startMatch}
+        onOpenMatchRating={handleOpenMatchRating}
       />
     );
   }
 
-  // Determine top vs bottom player bars based on board orientation
   const topColor: Color = orientation === 'w' ? 'b' : 'w';
   const bottomColor: Color = orientation;
 
@@ -792,29 +915,51 @@ export default function App() {
 
   const allowedBoardTurn: Color | 'both' = activeMode === 'stockfish' ? humanColor : 'both';
 
+  const returnToHub = (targetSection: HubSection) => {
+    opponentRef.current?.cancel();
+    setHubSection(targetSection);
+    setAppState('title');
+  };
+
   return (
-    <div className="min-h-screen w-full bg-[#181817] text-[#F1EFEA] flex flex-col">
-      {/* Compact Game Shell Utility Strip */}
+    <div className="min-h-screen w-full bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col">
+      {/* Compact Arena Utility Strip */}
       <div className="w-full max-w-[1320px] mx-auto px-4 sm:px-6 pt-3 pb-1 flex items-center justify-between gap-4">
         <button
           type="button"
-          onClick={() => setAppState('title')}
+          onClick={() => returnToHub('home')}
           className="flex items-center gap-2.5 text-left group cursor-pointer"
         >
-          <svg viewBox="0 0 36 36" className="w-7 h-7 shrink-0" aria-hidden="true">
-            <rect x="1.5" y="1.5" width="33" height="33" rx="7" fill="#242321" stroke="#81B64C" strokeWidth="1.4" />
-            <path d="M9 25h18v2.5H9V25zm1.5-2.5L8.5 14l5.2 3.6L18 10l4.3 7.6 5.2-3.6-2 8.5h-15z" fill="#F1EFEA" />
-          </svg>
-          <span className="text-base font-extrabold tracking-tight text-[#F6F4EE] group-hover:text-white whitespace-nowrap">
+          <AppLogoIcon iconId={preferences.appIcon} className="w-8 h-8 shrink-0" />
+          <span className="text-base font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">
             Crownline Chess
           </span>
-          <span className="hidden sm:inline text-xs text-[#8E8B84] whitespace-nowrap">
-            · {activeMode === 'stockfish' ? `vs Stockfish ${activeLevel.elo}` : activeMode === 'local' ? 'Pass & Play' : 'Analysis Board'}
+          <span className="hidden sm:inline text-xs text-[var(--app-text-muted)] whitespace-nowrap">
+            ·{' '}
+            {activeMode === 'stockfish'
+              ? `vs Stockfish ${activeLevel.elo}`
+              : activeMode === 'local'
+                ? 'Pass & Play'
+                : 'Analysis & Match Rating'}
           </span>
         </button>
 
         {/* Compact Utility Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Home lobby"
+            title="Home Lobby"
+            onClick={(e) => {
+              e.currentTarget.blur();
+              returnToHub('home');
+            }}
+            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <Home className="w-3.5 h-3.5" />
+          </button>
+
           <button
             type="button"
             tabIndex={-1}
@@ -824,9 +969,9 @@ export default function App() {
               e.currentTarget.blur();
               setShowNewMatchModal(true);
             }}
-            className="h-8 px-2.5 rounded-md bg-[#242321] hover:bg-[#312F2C] border border-white/[0.08] text-xs font-semibold text-[#E8E6DF] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+            className="h-8 px-2.5 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
           >
-            <Plus className="w-3.5 h-3.5 text-[#81B64C]" />
+            <Plus className="w-3.5 h-3.5 text-[var(--app-accent)]" />
             <span className="hidden sm:inline">New</span>
           </button>
 
@@ -839,7 +984,7 @@ export default function App() {
               e.currentTarget.blur();
               setOrientation((o) => (o === 'w' ? 'b' : 'w'));
             }}
-            className="w-8 h-8 rounded-md bg-[#242321] hover:bg-[#312F2C] border border-white/[0.08] text-[#D4D1C8] flex items-center justify-center transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
           >
             <ArrowUpDown className="w-3.5 h-3.5" />
           </button>
@@ -847,15 +992,33 @@ export default function App() {
           <button
             type="button"
             tabIndex={-1}
-            aria-label={muted ? 'Unmute audio' : 'Mute audio'}
+            aria-label={preferences.muted ? 'Unmute audio' : 'Mute audio'}
             title="Mute / Unmute (M)"
             onClick={(e) => {
               e.currentTarget.blur();
-              setMuted((m) => !m);
+              updatePreferences({ muted: !preferences.muted });
             }}
-            className="w-8 h-8 rounded-md bg-[#242321] hover:bg-[#312F2C] border border-white/[0.08] text-[#D4D1C8] flex items-center justify-center transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
           >
-            {muted ? <VolumeX className="w-3.5 h-3.5 text-[#9C9990]" /> : <Volume2 className="w-3.5 h-3.5" />}
+            {preferences.muted ? (
+              <VolumeX className="w-3.5 h-3.5 text-[var(--app-text-muted)]" />
+            ) : (
+              <Volume2 className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Open settings"
+            title="App Settings"
+            onClick={(e) => {
+              e.currentTarget.blur();
+              returnToHub('settings');
+            }}
+            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <Settings className="w-3.5 h-3.5" />
           </button>
 
           <button
@@ -867,7 +1030,7 @@ export default function App() {
               e.currentTarget.blur();
               setAppState((s) => (s === 'paused' ? 'playing' : 'paused'));
             }}
-            className="w-8 h-8 rounded-md bg-[#242321] hover:bg-[#312F2C] border border-white/[0.08] text-[#D4D1C8] flex items-center justify-center transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
           >
             <Pause className="w-3.5 h-3.5" />
           </button>
@@ -876,9 +1039,7 @@ export default function App() {
 
       {/* Main Arena: Centered Chessboard + Right Dock */}
       <main className="flex-1 w-full max-w-[1320px] mx-auto px-4 sm:px-6 py-3 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-6">
-        {/* Board Column */}
         <section aria-label="Chessboard arena" className="w-full max-w-[660px] flex flex-col">
-          {/* Top Player Strip */}
           <PlayerBar
             name={topColor === 'w' ? whiteName : blackName}
             subtitle={topColor === 'w' ? whiteSubtitle : blackSubtitle}
@@ -891,11 +1052,11 @@ export default function App() {
             accuracy={topColor === 'w' ? whiteAccuracy : blackAccuracy}
           />
 
-          {/* Interactive 8x8 Board + Eval Bar */}
           <ChessBoard
             fen={viewedFen}
             orientation={orientation}
-            themeId={boardTheme}
+            themeId={preferences.boardTheme}
+            pieceStyle={preferences.pieceStyle}
             interactive={canInteractWithBoard}
             allowedTurn={allowedBoardTurn}
             lastMove={
@@ -908,14 +1069,13 @@ export default function App() {
                 : null
             }
             engineArrows={engineArrows}
-            showCoordinates={showCoordinates}
-            showLegalMoves={showLegalMoves}
-            showEvalBar={showEvalBar}
+            showCoordinates={preferences.showCoordinates}
+            showLegalMoves={preferences.showLegalMoves}
+            showEvalBar={preferences.showEvalBar}
             evalScore={activeEvalScore}
             onMove={applyMove}
           />
 
-          {/* Bottom Player Strip */}
           <PlayerBar
             name={bottomColor === 'w' ? whiteName : blackName}
             subtitle={bottomColor === 'w' ? whiteSubtitle : blackSubtitle}
@@ -928,16 +1088,15 @@ export default function App() {
             accuracy={bottomColor === 'w' ? whiteAccuracy : blackAccuracy}
           />
 
-          {/* Historical Ply Banner (when browsing earlier moves during live match) */}
           {!isViewingLatest && activeMode !== 'analysis' && (
-            <div className="mt-1 px-3 py-2 rounded-lg bg-[#2A2926] border border-[#E6A832]/40 flex items-center justify-between text-xs">
-              <span className="text-[#E6D9B8]">
+            <div className="mt-1 px-3 py-2 rounded-lg bg-[var(--app-surface)] border border-[#E6A832]/40 flex items-center justify-between text-xs">
+              <span className="text-[var(--app-text)]">
                 Viewing move {Math.ceil(viewPly / 2)} of {Math.ceil(moves.length / 2)}
               </span>
               <button
                 type="button"
                 onClick={() => setViewPly(moves.length)}
-                className="font-semibold text-[#81B64C] hover:underline cursor-pointer"
+                className="font-semibold text-[var(--app-accent)] hover:underline cursor-pointer"
               >
                 Return to Live Position
               </button>
@@ -945,7 +1104,6 @@ export default function App() {
           )}
         </section>
 
-        {/* Right Dock: Moves, Stockfish UCI Analysis, Library, Settings */}
         <RightPanel
           activeTab={rightTab}
           onTabChange={setRightTab}
@@ -955,33 +1113,22 @@ export default function App() {
           currentFen={viewedFen}
           opening={opening}
           positionLabel={positionLabel}
+          whiteName={whiteName}
+          blackName={blackName}
           engineAnalysis={engineAnalysis}
           engineEnabled={engineEnabled}
           onToggleEngine={setEngineEnabled}
-          multiPv={multiPv}
-          onChangeMultiPv={setMultiPv}
-          analysisDepth={analysisDepth}
-          onChangeAnalysisDepth={setAnalysisDepth}
+          multiPv={preferences.multiPv}
+          onChangeMultiPv={(n) => updatePreferences({ multiPv: n })}
+          analysisDepth={preferences.analysisDepth}
           showBestArrow={showBestArrow}
           onToggleBestArrow={(val) => {
             setShowBestArrow(val);
             if (!val) setHintArrow(null);
           }}
-          showEvalBar={showEvalBar}
-          onToggleEvalBar={setShowEvalBar}
-          showCoordinates={showCoordinates}
-          onToggleCoordinates={setShowCoordinates}
-          showLegalMoves={showLegalMoves}
-          onToggleLegalMoves={setShowLegalMoves}
-          boardTheme={boardTheme}
-          onChangeBoardTheme={setBoardTheme}
-          muted={muted}
-          onToggleMuted={() => setMuted((m) => !m)}
           isGameOver={termination.isOver}
           isReviewing={isReviewing}
           reviewProgress={reviewProgress}
-          whiteAccuracy={whiteAccuracy}
-          blackAccuracy={blackAccuracy}
           onSelectPly={(ply) => {
             setViewPly(ply);
             setHintArrow(null);
@@ -991,31 +1138,28 @@ export default function App() {
           onTakeback={handleTakeback}
           onOfferDraw={() => {
             setAgreedDraw(true);
-            playChessSound('gameover', muted);
+            playChessSound('gameover', preferences.muted);
           }}
           onResign={() => {
             const resigner: Color = activeMode === 'stockfish' ? humanColor : latestChess.turn();
             setResignedBy(resigner);
-            playChessSound('gameover', muted);
+            playChessSound('gameover', preferences.muted);
           }}
           onNewMatch={() => setShowNewMatchModal(true)}
           onRunGameReview={handleRunGameReview}
           onPlayEngineMove={handlePlayEngineMove}
-          onImportPgnOrFen={handleImportPgnOrFen}
+          onImportPgnOrFen={(txt) => handleImportPgnOrFen(txt, undefined, false)}
+          onImportAndRatePgn={(txt) => handleImportPgnOrFen(txt, 'Rated Match Review', true)}
           onLoadStudy={handleLoadStudy}
           pgnText={pgnText}
         />
       </main>
 
-      {/* Modals */}
       {appState === 'paused' && (
         <PauseModal
           onResume={() => setAppState('playing')}
           onRestart={() => startMatch()}
-          onReturnTitle={() => {
-            opponentRef.current?.cancel();
-            setAppState('title');
-          }}
+          onReturnHome={() => returnToHub('home')}
         />
       )}
 
@@ -1027,11 +1171,11 @@ export default function App() {
           totalMoves={moves.length}
           whiteAccuracy={whiteAccuracy}
           blackAccuracy={blackAccuracy}
-          onAnalyze={() => {
+          onRateMatch={() => {
             setGameOverDismissed(true);
             setActiveMode('analysis');
             setShowBestArrow(true);
-            setRightTab('engine');
+            setRightTab('rating');
             handleRunGameReview();
           }}
           onPlayAgain={() => startMatch()}

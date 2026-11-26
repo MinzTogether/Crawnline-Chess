@@ -5,23 +5,96 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-:root {
+:root,
+:root[data-app-theme="dark-slate"] {
   color-scheme: dark;
+  --app-bg: #181817;
+  --app-rail: #1E1D1B;
+  --app-surface: #232220;
+  --app-surface-2: #1B1A18;
+  --app-surface-hover: #2E2D2A;
+  --app-border: rgba(255, 255, 255, 0.08);
+  --app-border-strong: rgba(255, 255, 255, 0.16);
+  --app-text: #F2F0EA;
+  --app-text-muted: #A4A199;
+  --app-text-subtle: #78756E;
+  --app-accent: #81B64C;
+  --app-accent-hover: #8FC558;
+  --app-accent-shadow: #5D8933;
+  --app-accent-fg: #12160D;
+  --app-accent-soft: rgba(129, 182, 76, 0.16);
+}
+
+:root[data-app-theme="midnight-emerald"] {
+  color-scheme: dark;
+  --app-bg: #101714;
+  --app-rail: #141E1A;
+  --app-surface: #192520;
+  --app-surface-2: #121B17;
+  --app-surface-hover: #22332C;
+  --app-border: rgba(210, 245, 225, 0.09);
+  --app-border-strong: rgba(210, 245, 225, 0.18);
+  --app-text: #EDF4F0;
+  --app-text-muted: #99B0A4;
+  --app-text-subtle: #698074;
+  --app-accent: #6CC067;
+  --app-accent-hover: #7ED079;
+  --app-accent-shadow: #478E43;
+  --app-accent-fg: #0D180F;
+  --app-accent-soft: rgba(108, 192, 103, 0.18);
+}
+
+:root[data-app-theme="walnut-lounge"] {
+  color-scheme: dark;
+  --app-bg: #1A1512;
+  --app-rail: #211B17;
+  --app-surface: #28211C;
+  --app-surface-2: #1E1814;
+  --app-surface-hover: #352C25;
+  --app-border: rgba(255, 232, 205, 0.09);
+  --app-border-strong: rgba(255, 232, 205, 0.18);
+  --app-text: #F5EFE7;
+  --app-text-muted: #B3A497;
+  --app-text-subtle: #847467;
+  --app-accent: #D99B3C;
+  --app-accent-hover: #E6AC50;
+  --app-accent-shadow: #A26E20;
+  --app-accent-fg: #1C1306;
+  --app-accent-soft: rgba(217, 155, 60, 0.18);
+}
+
+:root[data-app-theme="light-classic"] {
+  color-scheme: light;
+  --app-bg: #ECEAE4;
+  --app-rail: #E3E0D8;
+  --app-surface: #FFFFFF;
+  --app-surface-2: #F4F2EC;
+  --app-surface-hover: #EAE7DF;
+  --app-border: rgba(24, 24, 23, 0.1);
+  --app-border-strong: rgba(24, 24, 23, 0.2);
+  --app-text: #1B1A18;
+  --app-text-muted: #5C5A54;
+  --app-text-subtle: #7B7870;
+  --app-accent: #5D9432;
+  --app-accent-hover: #6AA53C;
+  --app-accent-shadow: #416B20;
+  --app-accent-fg: #FFFFFF;
+  --app-accent-soft: rgba(93, 148, 50, 0.14);
 }
 
 body {
   font-family: var(--font-sans);
-  background-color: #181817;
-  color: #f1efea;
+  background-color: var(--app-bg);
+  color: var(--app-text);
   margin: 0;
   overflow-x: hidden;
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
 
-/* Subtle dark scrollbars for move sheet and engine lines */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -32,12 +105,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(128, 128, 128, 0.28);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: rgba(128, 128, 128, 0.42);
 }
 
 @keyframes piece-pop {
