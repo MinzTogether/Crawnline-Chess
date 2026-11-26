@@ -1,0 +1,443 @@
+import type { Color } from 'chess.js';
+import type { EngineAnalysis, EngineLine, EvalScore, StockfishLevel } from '../types/chess';
+import { uciLineToSan } from '../game/chessLogic';
+import { parseBestMoveLine, parseUciInfoLine } from './uciParser';
+
+function detectWasmSupport(): boolean {
+  try {
+    if (typeof WebAssembly === 'object' && typeof WebAssembly.validate === 'function') {
+      return WebAssembly.validate(Uint8Array.of(0x0, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00));
+    }
+  } catch {
+    // Fall back to asm.js
+  }
+  return false;
+}
+
+function getStockfishWorkerUrl(): string {
+  return detectWasmSupport() ? '/stockfish/stockfish.wasm.js' : '/stockfish/stockfish.js';
+}
+
+function getTurnFromFen(fen: string): Color {
+  const parts = fen.split(' ');
+  return parts[1] === 'b' ? 'b' : 'w';
+}
+
+interface PendingJob {
+  fen: string;
+  depth: number;
+  multiPv: number;
+  mode: 'stream' | 'single';
+  onUpdate?: (analysis: EngineAnalysis) => void;
+  resolveSingle?: (result: { score: EvalScore; bestMove: string | null }) => void;
+}
+
+/**
+ * Dedicated Stockfish Web Worker controller for real-time MultiPV position analysis
+ * and on-demand full game review.
+ *
+ * Strictly serializes stop -> bestmove -> setoption -> isready -> readyok -> go
+ * so single-threaded Emscripten Stockfish WASM never drops depth or collides across FEN changes.
+ */
+export class StockfishAnalyzer {
+  private worker: Worker | null = null;
+  private isReady = false;
+  private initPromise: Promise<void> | null = null;
+
+  private phase: 'idle' | 'stopping' | 'syncing' | 'searching' = 'idle';
+  private activeJob: PendingJob | null = null;
+  private queuedJob: PendingJob | null = null;
+  private currentMultiPv = 1;
+
+  private linesMap = new Map<number, EngineLine>();
+  private latestDepth = 0;
+  private latestNodes = 0;
+  private latestNps = 0;
+  private bestMoveUci: string | null = null;
+  private ponderUci: string | null = null;
+
+  async init(): Promise<void> {
+    if (this.isReady && this.worker) return;
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = new Promise<void>((resolve, reject) => {
+      try {
+        const url = getStockfishWorkerUrl();
+        const worker = new Worker(url);
+        this.worker = worker;
+
+        const onInitMessage = (event: MessageEvent) => {
+          const line = typeof event.data === 'string' ? event.data : String(event.data ?? '');
+          if (line.includes('uciok')) {
+            worker.postMessage('isready');
+          } else if (line.includes('readyok')) {
+            worker.removeEventListener('message', onInitMessage);
+            worker.addEventListener('message', this.handleMessage);
+            this.isReady = true;
+            this.phase = 'idle';
+            resolve();
+          }
+        };
+
+        worker.addEventListener('message', onInitMessage);
+        worker.addEventListener('error', (err) => {
+          if (!this.isReady) {
+            if (url.endsWith('stockfish.wasm.js')) {
+              try {
+                worker.terminate();
+                const fallback = new Worker('/stockfish/stockfish.js');
+                this.worker = fallback;
+                fallback.addEventListener('message', onInitMessage);
+                fallback.postMessage('uci');
+                return;
+              } catch (fallbackErr) {
+                reject(fallbackErr);
+                return;
+              }
+            }
+            reject(err);
+          }
+        });
+
+        worker.postMessage('uci');
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    return this.initPromise;
+  }
+
+  private scheduleJob(job: PendingJob) {
+    if (!this.worker) return;
+
+    // Resolve any superseded single-eval job cleanly
+    if (this.queuedJob?.mode === 'single' && this.queuedJob.resolveSingle) {
+      this.queuedJob.resolveSingle({ score: { type: 'cp', value: 0 }, bestMove: null });
+    }
+    this.queuedJob = job;
+
+    if (this.phase === 'idle') {
+      this.startQueuedJob();
+    } else if (this.phase === 'searching') {
+      this.phase = 'stopping';
+      this.worker.postMessage('stop');
+    }
+    // If phase is already 'stopping' or 'syncing', startQueuedJob() will pick up queuedJob automatically.
+  }
+
+  private startQueuedJob() {
+    if (!this.worker || !this.queuedJob) {
+      this.phase = 'idle';
+      return;
+    }
+
+    const job = this.queuedJob;
+    this.queuedJob = null;
+    this.activeJob = job;
+    this.linesMap.clear();
+    this.latestDepth = 0;
+    this.latestNodes = 0;
+    this.latestNps = 0;
+    this.bestMoveUci = null;
+    this.ponderUci = null;
+
+    if (job.multiPv !== this.currentMultiPv) {
+      this.currentMultiPv = job.multiPv;
+      this.worker.postMessage(`setoption name MultiPV value ${job.multiPv}`);
+    }
+
+    this.phase = 'syncing';
+    this.worker.postMessage('isready');
+  }
+
+  private handleMessage = (event: MessageEvent) => {
+    const raw = typeof event.data === 'string' ? event.data : String(event.data ?? '');
+    const lines = raw.split(/\r?\n/);
+
+    for (const line of lines) {
+      if (!line) continue;
+      const trimmed = line.trim();
+
+      if (trimmed === 'readyok' && this.phase === 'syncing') {
+        if (this.queuedJob) {
+          // A newer job arrived while syncing; switch straight to it
+          this.startQueuedJob();
+          continue;
+        }
+        if (this.activeJob && this.worker) {
+          this.phase = 'searching';
+          this.worker.postMessage(`position fen ${this.activeJob.fen}`);
+          this.worker.postMessage(`go depth ${this.activeJob.depth}`);
+        } else {
+          this.phase = 'idle';
+        }
+        continue;
+      }
+
+      const best = parseBestMoveLine(trimmed);
+      if (best) {
+        if (this.phase === 'stopping') {
+          this.phase = 'idle';
+          this.activeJob = null;
+          if (this.queuedJob) {
+            this.startQueuedJob();
+          }
+          continue;
+        }
+
+        if (this.phase === 'searching' && this.activeJob) {
+          this.bestMoveUci = best.bestMove;
+          this.ponderUci = best.ponder;
+          const finishedJob = this.activeJob;
+          this.phase = 'idle';
+          this.activeJob = null;
+
+          if (finishedJob.mode === 'single' && finishedJob.resolveSingle) {
+            const topLine = this.linesMap.get(1);
+            finishedJob.resolveSingle({
+              score: topLine?.score ?? { type: 'cp', value: 0 },
+              bestMove: best.bestMove,
+            });
+          } else if (finishedJob.mode === 'stream' && finishedJob.onUpdate) {
+            this.emitUpdate(finishedJob, false);
+          }
+
+          if (this.queuedJob) {
+            this.startQueuedJob();
+          }
+        }
+        continue;
+      }
+
+      if (this.phase !== 'searching' || !this.activeJob) {
+        continue;
+      }
+
+      const sideToMove = getTurnFromFen(this.activeJob.fen);
+      const parsedInfo = parseUciInfoLine(trimmed, sideToMove);
+      if (parsedInfo) {
+        parsedInfo.pvSan = uciLineToSan(this.activeJob.fen, parsedInfo.pvUci, 10);
+        if (parsedInfo.multipv <= this.activeJob.multiPv) {
+          this.linesMap.set(parsedInfo.multipv, parsedInfo);
+        }
+        if (parsedInfo.depth >= this.latestDepth) {
+          this.latestDepth = parsedInfo.depth;
+        }
+        if (parsedInfo.nodes > 0) this.latestNodes = parsedInfo.nodes;
+        if (parsedInfo.nps > 0) this.latestNps = parsedInfo.nps;
+
+        if (this.activeJob.mode === 'stream' && this.activeJob.onUpdate) {
+          this.emitUpdate(this.activeJob, true);
+        }
+      }
+    }
+  };
+
+  private emitUpdate(job: PendingJob, isSearching: boolean) {
+    if (!job.onUpdate) return;
+    const sortedLines = Array.from(this.linesMap.values()).sort((a, b) => a.multipv - b.multipv);
+    const bestFromLine = sortedLines[0]?.pvUci[0] ?? null;
+
+    job.onUpdate({
+      fen: job.fen,
+      depth: this.latestDepth,
+      nodes: this.latestNodes,
+      nps: this.latestNps,
+      bestMoveUci: this.bestMoveUci ?? bestFromLine,
+      ponderUci: this.ponderUci,
+      lines: sortedLines,
+      isSearching,
+    });
+  }
+
+  async analyzePosition(
+    fen: string,
+    options: { depth: number; multiPv: number },
+    onUpdate: (analysis: EngineAnalysis) => void
+  ): Promise<void> {
+    await this.init();
+    if (!this.worker) return;
+
+    this.scheduleJob({
+      fen,
+      depth: Math.max(8, Math.min(22, options.depth)),
+      multiPv: Math.max(1, Math.min(3, options.multiPv)),
+      mode: 'stream',
+      onUpdate,
+    });
+  }
+
+  async evaluateOnce(fen: string, depth = 11): Promise<{ score: EvalScore; bestMove: string | null }> {
+    await this.init();
+    if (!this.worker) return { score: { type: 'cp', value: 0 }, bestMove: null };
+
+    return new Promise((resolve) => {
+      this.scheduleJob({
+        fen,
+        depth: Math.max(6, Math.min(18, depth)),
+        multiPv: 1,
+        mode: 'single',
+        resolveSingle: resolve,
+      });
+    });
+  }
+
+  stop() {
+    this.queuedJob = null;
+    if (this.activeJob?.mode === 'single' && this.activeJob.resolveSingle) {
+      this.activeJob.resolveSingle({ score: { type: 'cp', value: 0 }, bestMove: null });
+    }
+    this.activeJob = null;
+    if (this.phase === 'searching' && this.worker) {
+      this.phase = 'stopping';
+      this.worker.postMessage('stop');
+    } else if (this.phase === 'syncing') {
+      this.phase = 'idle';
+    }
+  }
+
+  terminate() {
+    this.stop();
+    this.worker?.terminate();
+    this.worker = null;
+    this.isReady = false;
+    this.initPromise = null;
+    this.phase = 'idle';
+  }
+}
+
+/**
+ * Dedicated Stockfish Web Worker for playing as the opponent bot with configurable UCI Skill Level.
+ */
+export class StockfishOpponent {
+  private worker: Worker | null = null;
+  private isReady = false;
+  private initPromise: Promise<void> | null = null;
+  private resolver: ((uciMove: string | null) => void) | null = null;
+  private isSearching = false;
+  private pendingMove: { fen: string; level: StockfishLevel; resolve: (m: string | null) => void } | null = null;
+
+  async init(): Promise<void> {
+    if (this.isReady && this.worker) return;
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = new Promise<void>((resolve, reject) => {
+      try {
+        const url = getStockfishWorkerUrl();
+        const worker = new Worker(url);
+        this.worker = worker;
+
+        const onInit = (event: MessageEvent) => {
+          const line = typeof event.data === 'string' ? event.data : String(event.data ?? '');
+          if (line.includes('uciok')) {
+            worker.postMessage('isready');
+          } else if (line.includes('readyok')) {
+            worker.removeEventListener('message', onInit);
+            worker.addEventListener('message', this.handleMessage);
+            this.isReady = true;
+            resolve();
+          }
+        };
+
+        worker.addEventListener('message', onInit);
+        worker.addEventListener('error', (err) => {
+          if (!this.isReady) {
+            if (url.endsWith('stockfish.wasm.js')) {
+              try {
+                worker.terminate();
+                const fallback = new Worker('/stockfish/stockfish.js');
+                this.worker = fallback;
+                fallback.addEventListener('message', onInit);
+                fallback.postMessage('uci');
+                return;
+              } catch (fallbackErr) {
+                reject(fallbackErr);
+                return;
+              }
+            }
+            reject(err);
+          }
+        });
+
+        worker.postMessage('uci');
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    return this.initPromise;
+  }
+
+  private startPending() {
+    if (!this.worker || !this.pendingMove) return;
+    const { fen, level, resolve } = this.pendingMove;
+    this.pendingMove = null;
+    this.resolver = resolve;
+    this.isSearching = true;
+    this.worker.postMessage(`setoption name Skill Level value ${level.skillLevel}`);
+    this.worker.postMessage(`position fen ${fen}`);
+    this.worker.postMessage(`go depth ${level.depthCap} movetime ${level.moveTimeMs}`);
+  }
+
+  private handleMessage = (event: MessageEvent) => {
+    const raw = typeof event.data === 'string' ? event.data : String(event.data ?? '');
+    for (const line of raw.split(/\r?\n/)) {
+      const best = parseBestMoveLine(line.trim());
+      if (best) {
+        this.isSearching = false;
+        const resolve = this.resolver;
+        this.resolver = null;
+        if (resolve) resolve(best.bestMove);
+        if (this.pendingMove) {
+          this.startPending();
+        }
+      }
+    }
+  };
+
+  async computeMove(fen: string, level: StockfishLevel): Promise<string | null> {
+    await this.init();
+    if (!this.worker) return null;
+
+    return new Promise<string | null>((resolve) => {
+      if (this.pendingMove) {
+        this.pendingMove.resolve(null);
+      }
+      this.pendingMove = { fen, level, resolve };
+
+      if (this.isSearching) {
+        if (this.resolver) {
+          this.resolver(null);
+          this.resolver = null;
+        }
+        this.worker!.postMessage('stop');
+      } else {
+        this.startPending();
+      }
+    });
+  }
+
+  cancel() {
+    if (this.pendingMove) {
+      this.pendingMove.resolve(null);
+      this.pendingMove = null;
+    }
+    if (this.resolver) {
+      this.resolver(null);
+      this.resolver = null;
+    }
+    if (this.isSearching) {
+      this.worker?.postMessage('stop');
+    }
+  }
+
+  terminate() {
+    this.cancel();
+    this.worker?.terminate();
+    this.worker = null;
+    this.isReady = false;
+    this.initPromise = null;
+    this.isSearching = false;
+  }
+}

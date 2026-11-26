@@ -1,0 +1,8 @@
+{
+  "name": "Crownline Chess",
+  "description": "Play chess against the real Stockfish engine or locally with live MultiPV UCI engine analysis, move classification, evaluation graph, opening explorer, and PGN/FEN tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
