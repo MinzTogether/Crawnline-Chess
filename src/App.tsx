@@ -1044,6 +1044,11 @@ export default function App() {
             name={topColor === 'w' ? whiteName : blackName}
             subtitle={topColor === 'w' ? whiteSubtitle : blackSubtitle}
             color={topColor}
+            avatarImage={
+              (activeMode === 'stockfish' && topColor === humanColor) || (activeMode === 'local' && topColor === 'w')
+                ? profile.avatarImage
+                : null
+            }
             isActiveTurn={!termination.isOver && viewedChess.turn() === topColor}
             isEngineThinking={activeMode === 'stockfish' && isBotThinking && topColor !== humanColor}
             capturedPieces={topColor === 'w' ? material.capturedByWhite : material.capturedByBlack}
@@ -1080,6 +1085,12 @@ export default function App() {
             name={bottomColor === 'w' ? whiteName : blackName}
             subtitle={bottomColor === 'w' ? whiteSubtitle : blackSubtitle}
             color={bottomColor}
+            avatarImage={
+              (activeMode === 'stockfish' && bottomColor === humanColor) ||
+              (activeMode === 'local' && bottomColor === 'w')
+                ? profile.avatarImage
+                : null
+            }
             isActiveTurn={!termination.isOver && viewedChess.turn() === bottomColor}
             isEngineThinking={activeMode === 'stockfish' && isBotThinking && bottomColor !== humanColor}
             capturedPieces={bottomColor === 'w' ? material.capturedByWhite : material.capturedByBlack}

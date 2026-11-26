@@ -6,7 +6,21 @@ export type GameMode = 'stockfish' | 'local' | 'analysis';
 
 export type PlayerSideChoice = 'w' | 'b' | 'random';
 
-export type BoardThemeId = 'tournament' | 'walnut' | 'slate' | 'graphite';
+export type BoardThemeId =
+  | 'tournament'
+  | 'walnut'
+  | 'slate'
+  | 'graphite'
+  | 'jade-glass'
+  | 'ocean-reef'
+  | 'royal-amethyst'
+  | 'marble-cream'
+  | 'terracotta'
+  | 'obsidian-neon'
+  | 'sakura-blush'
+  | 'honey-birch'
+  | 'arctic-ice'
+  | 'crimson-mahogany';
 
 export interface BoardTheme {
   id: BoardThemeId;
@@ -69,6 +83,126 @@ export const BOARD_THEMES: Record<BoardThemeId, BoardTheme> = {
     selectedDark: '#B0AD4B',
     coordLight: '#6C7077',
     coordDark: '#D8D8D4',
+  },
+  'jade-glass': {
+    id: 'jade-glass',
+    name: 'Frosted Jade',
+    light: '#E3F2EC',
+    dark: '#4E8C79',
+    lastMoveLight: '#C5F0B0',
+    lastMoveDark: '#67B887',
+    selectedLight: '#B8F2C0',
+    selectedDark: '#59B081',
+    coordLight: '#4E8C79',
+    coordDark: '#E3F2EC',
+  },
+  'ocean-reef': {
+    id: 'ocean-reef',
+    name: 'Ocean Reef',
+    light: '#E4F0F7',
+    dark: '#4C7DA1',
+    lastMoveLight: '#BFE4F5',
+    lastMoveDark: '#5DA3C9',
+    selectedLight: '#AEE0F7',
+    selectedDark: '#4D96BF',
+    coordLight: '#4C7DA1',
+    coordDark: '#E4F0F7',
+  },
+  'royal-amethyst': {
+    id: 'royal-amethyst',
+    name: 'Royal Amethyst',
+    light: '#ECE7F5',
+    dark: '#7B629E',
+    lastMoveLight: '#DFC7F7',
+    lastMoveDark: '#9A78C4',
+    selectedLight: '#D6B8F5',
+    selectedDark: '#8E69BA',
+    coordLight: '#7B629E',
+    coordDark: '#ECE7F5',
+  },
+  'marble-cream': {
+    id: 'marble-cream',
+    name: 'Carrara Marble',
+    light: '#F6F4EF',
+    dark: '#9C988E',
+    lastMoveLight: '#EFE598',
+    lastMoveDark: '#C2B86A',
+    selectedLight: '#F2E582',
+    selectedDark: '#C7BC5D',
+    coordLight: '#858178',
+    coordDark: '#F6F4EF',
+  },
+  terracotta: {
+    id: 'terracotta',
+    name: 'Terracotta Clay',
+    light: '#F5E4D3',
+    dark: '#B86A4D',
+    lastMoveLight: '#F7D88A',
+    lastMoveDark: '#D99B52',
+    selectedLight: '#F5CE73',
+    selectedDark: '#CF8F44',
+    coordLight: '#B86A4D',
+    coordDark: '#F5E4D3',
+  },
+  'obsidian-neon': {
+    id: 'obsidian-neon',
+    name: 'Obsidian Cyan',
+    light: '#BCCCD1',
+    dark: '#314954',
+    lastMoveLight: '#8CE2E8',
+    lastMoveDark: '#368C99',
+    selectedLight: '#78DAE3',
+    selectedDark: '#2E7E8C',
+    coordLight: '#314954',
+    coordDark: '#D2E4EA',
+  },
+  'sakura-blush': {
+    id: 'sakura-blush',
+    name: 'Sakura Blush',
+    light: '#FAEDF0',
+    dark: '#BA768A',
+    lastMoveLight: '#F7CFD8',
+    lastMoveDark: '#D689A0',
+    selectedLight: '#F5BFD0',
+    selectedDark: '#CC7892',
+    coordLight: '#A86176',
+    coordDark: '#FAEDF0',
+  },
+  'honey-birch': {
+    id: 'honey-birch',
+    name: 'Honey Birch',
+    light: '#FBF0D9',
+    dark: '#C99654',
+    lastMoveLight: '#F7E37E',
+    lastMoveDark: '#DEC14B',
+    selectedLight: '#F5DD67',
+    selectedDark: '#D6B73C',
+    coordLight: '#A8793C',
+    coordDark: '#FBF0D9',
+  },
+  'arctic-ice': {
+    id: 'arctic-ice',
+    name: 'Arctic Ice',
+    light: '#EDF4FA',
+    dark: '#6D92B8',
+    lastMoveLight: '#C2E4FA',
+    lastMoveDark: '#74B2DC',
+    selectedLight: '#AFDCFA',
+    selectedDark: '#60A3D1',
+    coordLight: '#5C80A6',
+    coordDark: '#EDF4FA',
+  },
+  'crimson-mahogany': {
+    id: 'crimson-mahogany',
+    name: 'Crimson Mahogany',
+    light: '#F2E5DC',
+    dark: '#8C4348',
+    lastMoveLight: '#F2CA85',
+    lastMoveDark: '#BF7658',
+    selectedLight: '#EDBE72',
+    selectedDark: '#B3684B',
+    coordLight: '#8C4348',
+    coordDark: '#F2E5DC',
   },
 };
 

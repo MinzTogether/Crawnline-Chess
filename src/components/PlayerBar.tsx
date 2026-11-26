@@ -7,6 +7,7 @@ interface PlayerBarProps {
   name: string;
   subtitle: string;
   color: Color;
+  avatarImage?: string | null;
   isActiveTurn: boolean;
   isEngineThinking?: boolean;
   capturedPieces: PieceSymbol[];
@@ -19,6 +20,7 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
   name,
   subtitle,
   color,
+  avatarImage,
   isActiveTurn,
   isEngineThinking = false,
   capturedPieces,
@@ -32,16 +34,24 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
   return (
     <div className="flex items-center justify-between gap-3 py-2 px-1">
       <div className="flex items-center gap-3 min-w-0">
-        <div
-          className={`w-9 h-9 rounded-md shrink-0 flex items-center justify-center border font-bold text-sm ${
-            color === 'w'
-              ? 'bg-[#ECEAE4] text-[#181817] border-black/15'
-              : 'bg-[#2A2926] text-[#F1EFEA] border-white/15'
-          }`}
-          aria-hidden="true"
-        >
-          {color === 'w' ? '♔' : '♚'}
-        </div>
+        {avatarImage ? (
+          <img
+            src={avatarImage}
+            alt={name}
+            className="w-9 h-9 rounded-md shrink-0 object-cover border border-[var(--app-border-strong)]"
+          />
+        ) : (
+          <div
+            className={`w-9 h-9 rounded-md shrink-0 flex items-center justify-center border font-bold text-sm ${
+              color === 'w'
+                ? 'bg-[#ECEAE4] text-[#181817] border-black/15'
+                : 'bg-[#2A2926] text-[#F1EFEA] border-white/15'
+            }`}
+            aria-hidden="true"
+          >
+            {color === 'w' ? '♔' : '♚'}
+          </div>
+        )}
 
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm">

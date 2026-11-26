@@ -19,6 +19,12 @@ export const ChessPiece: React.FC<ChessPieceProps> = React.memo(
     const fill = isWhite ? palette.whiteFill : palette.blackFill;
     const stroke = isWhite ? palette.whiteStroke : palette.blackStroke;
     const detailStroke = isWhite ? palette.whiteStroke : palette.blackDetail;
+    const baseShadow = isWhite
+      ? 'drop-shadow(0 2px 2px rgba(0, 0, 0, 0.28))'
+      : 'drop-shadow(0 2px 2px rgba(0, 0, 0, 0.36))';
+    const filterValue = palette.glowColor
+      ? `${baseShadow} drop-shadow(0 0 3px ${palette.glowColor})`
+      : baseShadow;
 
     return (
       <svg
@@ -26,9 +32,8 @@ export const ChessPiece: React.FC<ChessPieceProps> = React.memo(
         className={className}
         aria-hidden="true"
         style={{
-          filter: isWhite
-            ? 'drop-shadow(0 2px 2px rgba(0, 0, 0, 0.28))'
-            : 'drop-shadow(0 2px 2px rgba(0, 0, 0, 0.36))',
+          filter: filterValue,
+          opacity: palette.pieceOpacity ?? 1,
         }}
       >
         {type === 'p' && (

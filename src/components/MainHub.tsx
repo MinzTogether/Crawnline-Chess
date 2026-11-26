@@ -1,41 +1,78 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Award,
+  Camera,
   Check,
   ChevronRight,
   Cpu,
   Home,
   Settings,
   Swords,
+  Trash2,
+  Upload,
   User,
   Users,
 } from 'lucide-react';
 import {
-  BOARD_THEMES,
   STOCKFISH_LEVELS,
   TIME_CONTROLS,
-  type BoardThemeId,
   type GameMode,
   type MatchSettings,
   type PlayerSideChoice,
 } from '../types/chess';
 import {
-  APP_THEMES,
-  PIECE_STYLES,
   type AppPreferences,
-  type PieceStyleId,
   type SavedMatch,
   type UserProfile,
 } from '../types/preferences';
-import { APP_ICONS, AppLogoIcon } from './AppIcons';
+import { AppLogoIcon } from './AppIcons';
 import { ChessBoard } from './ChessBoard';
-import { ChessPiece } from './ChessPieces';
+import { SettingsSection, type SettingsSubPage } from './SettingsSection';
 
 export type HubSection = 'home' | 'settings' | 'profile';
 
 const SHOWCASE_FEN = 'r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq - 1 5';
 
 const AVATAR_COLORS = ['#81B64C', '#5C9CE6', '#D99B3C', '#26C2A3', '#D96666', '#9C7EE6'];
+
+/** Center-crops and compresses an uploaded image file to a 256x256 JPEG data URL for localStorage. */
+function processAvatarFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('Please choose a valid image file (PNG, JPG, WebP, or GIF).'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the selected image file.'));
+    reader.onload = () => {
+      const src = typeof reader.result === 'string' ? reader.result : '';
+      if (!src) {
+        reject(new Error('Empty image data.'));
+        return;
+      }
+      const img = new Image();
+      img.onerror = () => reject(new Error('Unsupported image format.'));
+      img.onload = () => {
+        const size = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(src);
+          return;
+        }
+        const minSide = Math.min(img.width, img.height);
+        const sx = (img.width - minSide) / 2;
+        const sy = (img.height - minSide) / 2;
+        ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+        resolve(canvas.toDataURL('image/webp', 0.88));
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 interface MainHubProps {
   section: HubSection;
@@ -67,6 +104,29 @@ export const MainHub: React.FC<MainHubProps> = ({
   const [pgnQuickInput, setPgnQuickInput] = useState('');
   const [pgnQuickError, setPgnQuickError] = useState<string | null>(null);
   const [profileSavedToast, setProfileSavedToast] = useState(false);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+  const [settingsSubPage, setSettingsSubPage] = useState<SettingsSubPage>('root');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleSelectNavSection = (next: HubSection) => {
+    if (next === 'settings') {
+      setSettingsSubPage('root');
+    }
+    onChangeSection(next);
+  };
+
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const dataUrl = await processAvatarFile(file);
+      onUpdateProfile({ avatarImage: dataUrl });
+      setAvatarUploadError(null);
+    } catch (err) {
+      setAvatarUploadError(err instanceof Error ? err.message : 'Failed to upload image.');
+    }
+  };
 
   const activeLevel =
     STOCKFISH_LEVELS.find((l) => l.id === matchSettings.stockfishLevelId) ?? STOCKFISH_LEVELS[2];
@@ -158,7 +218,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                   key={item.id}
                   type="button"
                   aria-current={active ? 'page' : undefined}
-                  onClick={() => onChangeSection(item.id)}
+                  onClick={() => handleSelectNavSection(item.id)}
                   className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-bold transition-colors cursor-pointer whitespace-nowrap ${
                     active
                       ? 'bg-[var(--app-surface)] text-[var(--app-text)] shadow-sm border border-[var(--app-border)]'
@@ -180,15 +240,23 @@ export const MainHub: React.FC<MainHubProps> = ({
         {/* Bottom Compact Profile Card */}
         <button
           type="button"
-          onClick={() => onChangeSection('profile')}
+          onClick={() => handleSelectNavSection('profile')}
           className="flex items-center gap-3 p-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors text-left cursor-pointer"
         >
-          <div
-            className="w-9 h-9 rounded-lg shrink-0 flex items-center justify-center font-extrabold text-sm text-[#12160D]"
-            style={{ backgroundColor: profile.avatarColor }}
-          >
-            {profile.displayName.slice(0, 2).toUpperCase()}
-          </div>
+          {profile.avatarImage ? (
+            <img
+              src={profile.avatarImage}
+              alt={profile.displayName}
+              className="w-9 h-9 rounded-lg shrink-0 object-cover border border-[var(--app-border-strong)]"
+            />
+          ) : (
+            <div
+              className="w-9 h-9 rounded-lg shrink-0 flex items-center justify-center font-extrabold text-sm text-[#12160D]"
+              style={{ backgroundColor: profile.avatarColor }}
+            >
+              {profile.displayName.slice(0, 2).toUpperCase()}
+            </div>
+          )}
           <div className="min-w-0">
             <div className="text-xs font-bold text-[var(--app-text)] truncate">{profile.displayName}</div>
             <div className="text-[11px] text-[var(--app-text-muted)] truncate">{profile.title}</div>
@@ -202,9 +270,22 @@ export const MainHub: React.FC<MainHubProps> = ({
           <AppLogoIcon iconId={preferences.appIcon} className="w-8 h-8 shrink-0" />
           <span className="text-base font-extrabold tracking-tight text-[var(--app-text)]">Crownline Chess</span>
         </div>
-        <span className="text-xs font-semibold text-[var(--app-text-muted)] truncate max-w-[140px]">
-          {profile.displayName}
-        </span>
+        <button
+          type="button"
+          onClick={() => handleSelectNavSection('profile')}
+          className="flex items-center gap-2 min-w-0 cursor-pointer"
+        >
+          {profile.avatarImage && (
+            <img
+              src={profile.avatarImage}
+              alt={profile.displayName}
+              className="w-6 h-6 rounded-md object-cover border border-[var(--app-border-strong)] shrink-0"
+            />
+          )}
+          <span className="text-xs font-semibold text-[var(--app-text-muted)] truncate max-w-[120px]">
+            {profile.displayName}
+          </span>
+        </button>
       </div>
 
       {/* Main Content Area */}
@@ -518,257 +599,14 @@ export const MainHub: React.FC<MainHubProps> = ({
           </div>
         )}
 
-        {/* ================= SETTINGS VIEW ================= */}
+        {/* ================= SETTINGS VIEW (CATEGORIZED SUB-PAGES) ================= */}
         {section === 'settings' && (
-          <div className="max-w-[920px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-7" data-testid="settings-view">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--app-text)]">
-                Settings
-              </h1>
-              <p className="text-sm text-[var(--app-text-muted)] mt-1">
-                Customize your interface theme, app icon, chessboard materials, and Stockfish engine defaults.
-              </p>
-            </div>
-
-            {/* 1. Interface Theme */}
-            <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-4">
-              <div>
-                <h2 className="text-base font-bold text-[var(--app-text)]">App Theme</h2>
-                <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
-                  Applies immediately across Home, Profile, and the playing arena.
-                </p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {APP_THEMES.map((t) => {
-                  const active = preferences.appTheme === t.id;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => onUpdatePreferences({ appTheme: t.id })}
-                      className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-2.5 ${
-                        active
-                          ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-                          : 'border-[var(--app-border)] bg-[var(--app-surface-2)] hover:border-[var(--app-border-strong)]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className="w-5 h-5 rounded-md border border-black/25"
-                            style={{ backgroundColor: t.swatchBg }}
-                          />
-                          <span
-                            className="w-5 h-5 rounded-md border border-black/25"
-                            style={{ backgroundColor: t.swatchSurface }}
-                          />
-                          <span
-                            className="w-5 h-5 rounded-md border border-black/20"
-                            style={{ backgroundColor: t.swatchAccent }}
-                          />
-                        </div>
-                        {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
-                      </div>
-                      <div>
-                        <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
-                        <div className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-snug">
-                          {t.description}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* 2. App Icon Picker */}
-            <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-4">
-              <div>
-                <h2 className="text-base font-bold text-[var(--app-text)]">App Icon</h2>
-                <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
-                  Updates the Crownline emblem across the sidebar, arena header, and browser tab icon.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                {APP_ICONS.map((ic) => {
-                  const active = preferences.appIcon === ic.id;
-                  return (
-                    <button
-                      key={ic.id}
-                      type="button"
-                      onClick={() => onUpdatePreferences({ appIcon: ic.id })}
-                      className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-colors cursor-pointer ${
-                        active
-                          ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-                          : 'border-[var(--app-border)] bg-[var(--app-surface-2)] hover:border-[var(--app-border-strong)]'
-                      }`}
-                    >
-                      <AppLogoIcon iconId={ic.id} className="w-12 h-12" />
-                      <span className="text-xs font-semibold text-[var(--app-text)] text-center leading-tight">
-                        {ic.name}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* 3. Board Theme & Piece Style */}
-            <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="flex flex-col gap-3">
-                <h2 className="text-base font-bold text-[var(--app-text)]">Board Theme</h2>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {Object.values(BOARD_THEMES).map((b) => {
-                    const active = preferences.boardTheme === b.id;
-                    return (
-                      <button
-                        key={b.id}
-                        type="button"
-                        onClick={() => onUpdatePreferences({ boardTheme: b.id as BoardThemeId })}
-                        className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-colors cursor-pointer ${
-                          active
-                            ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-                            : 'border-[var(--app-border)] bg-[var(--app-surface-2)] hover:border-[var(--app-border-strong)]'
-                        }`}
-                      >
-                        <span className="w-8 h-8 rounded overflow-hidden grid grid-cols-2 grid-rows-2 shrink-0 border border-black/25">
-                          <span style={{ backgroundColor: b.light }} />
-                          <span style={{ backgroundColor: b.dark }} />
-                          <span style={{ backgroundColor: b.dark }} />
-                          <span style={{ backgroundColor: b.light }} />
-                        </span>
-                        <span className="text-xs font-bold text-[var(--app-text)] truncate">{b.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <h2 className="text-base font-bold text-[var(--app-text)]">Piece Style</h2>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {(Object.keys(PIECE_STYLES) as PieceStyleId[]).map((pid) => {
-                    const style = PIECE_STYLES[pid];
-                    const active = preferences.pieceStyle === pid;
-                    return (
-                      <button
-                        key={pid}
-                        type="button"
-                        onClick={() => onUpdatePreferences({ pieceStyle: pid })}
-                        className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-colors cursor-pointer ${
-                          active
-                            ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-                            : 'border-[var(--app-border)] bg-[var(--app-surface-2)] hover:border-[var(--app-border-strong)]'
-                        }`}
-                      >
-                        <div className="flex items-center -space-x-2">
-                          <div className="w-9 h-9">
-                            <ChessPiece type="n" color="w" pieceStyle={pid} />
-                          </div>
-                          <div className="w-9 h-9">
-                            <ChessPiece type="k" color="b" pieceStyle={pid} />
-                          </div>
-                        </div>
-                        <span className="text-xs font-bold text-[var(--app-text)] text-center leading-tight">
-                          {style.name}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
-
-            {/* 4. Gameplay & Stockfish Defaults */}
-            <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-4">
-              <h2 className="text-base font-bold text-[var(--app-text)]">Gameplay &amp; Stockfish Defaults</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {[
-                  {
-                    label: 'Show Evaluation Bar',
-                    checked: preferences.showEvalBar,
-                    toggle: () => onUpdatePreferences({ showEvalBar: !preferences.showEvalBar }),
-                  },
-                  {
-                    label: 'Board Coordinates',
-                    checked: preferences.showCoordinates,
-                    toggle: () => onUpdatePreferences({ showCoordinates: !preferences.showCoordinates }),
-                  },
-                  {
-                    label: 'Legal Move Dots',
-                    checked: preferences.showLegalMoves,
-                    toggle: () => onUpdatePreferences({ showLegalMoves: !preferences.showLegalMoves }),
-                  },
-                  {
-                    label: 'Piece Sound Effects',
-                    checked: !preferences.muted,
-                    toggle: () => onUpdatePreferences({ muted: !preferences.muted }),
-                  },
-                ].map((opt) => (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    role="switch"
-                    aria-checked={opt.checked}
-                    onClick={opt.toggle}
-                    className="flex items-center justify-between px-3.5 py-3 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors cursor-pointer"
-                  >
-                    <span className="text-xs font-semibold text-[var(--app-text)]">{opt.label}</span>
-                    <span
-                      className={`w-9 h-5 rounded-full p-0.5 transition-colors flex items-center ${
-                        opt.checked ? 'bg-[var(--app-accent)] justify-end' : 'bg-black/30 justify-start'
-                      }`}
-                    >
-                      <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
-                    </span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-5 items-center">
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label htmlFor="pref-depth-slider" className="text-xs font-bold text-[var(--app-text)]">
-                      Default Stockfish Depth
-                    </label>
-                    <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)]">
-                      Depth {preferences.analysisDepth}
-                    </span>
-                  </div>
-                  <input
-                    id="pref-depth-slider"
-                    type="range"
-                    min={10}
-                    max={20}
-                    step={1}
-                    value={preferences.analysisDepth}
-                    onChange={(e) => onUpdatePreferences({ analysisDepth: Number(e.target.value) })}
-                    className="w-full accent-[var(--app-accent)] cursor-pointer"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[var(--app-text)]">MultiPV Analysis Lines</span>
-                  <div className="flex items-center gap-1.5">
-                    {[1, 2, 3].map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => onUpdatePreferences({ multiPv: n })}
-                        className={`w-8 h-8 rounded-lg font-mono text-xs font-bold cursor-pointer ${
-                          preferences.multiPv === n
-                            ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)]'
-                            : 'bg-[var(--app-surface-2)] text-[var(--app-text-muted)] border border-[var(--app-border)]'
-                        }`}
-                      >
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
+          <SettingsSection
+            subPage={settingsSubPage}
+            onChangeSubPage={setSettingsSubPage}
+            preferences={preferences}
+            onUpdatePreferences={onUpdatePreferences}
+          />
         )}
 
         {/* ================= PROFILE VIEW ================= */}
@@ -779,33 +617,94 @@ export const MainHub: React.FC<MainHubProps> = ({
                 Player Profile
               </h1>
               <p className="text-sm text-[var(--app-text-muted)] mt-1">
-                Manage your chess identity and inspect your Stockfish-rated match archive.
+                Manage your chess identity, upload a profile photo, and inspect your Stockfish-rated match archive.
               </p>
             </div>
 
             {/* Identity Editor Card */}
             <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col md:flex-row gap-6 items-start">
-              <div className="flex flex-col items-center gap-3 shrink-0">
-                <div
-                  className="w-20 h-20 rounded-2xl flex items-center justify-center text-2xl font-extrabold text-[#12160D] shadow-md"
-                  style={{ backgroundColor: profile.avatarColor }}
+              <div className="flex flex-col items-center gap-3 shrink-0 w-full md:w-auto">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  aria-label="Upload profile photo"
+                  onChange={handleAvatarFileChange}
+                  className="hidden"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Click to upload profile photo"
+                  className="relative group w-24 h-24 rounded-2xl overflow-hidden shadow-md border border-[var(--app-border-strong)] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]"
                 >
-                  {profile.displayName.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {AVATAR_COLORS.map((hex) => (
-                    <button
-                      key={hex}
-                      type="button"
-                      aria-label={`Select avatar color ${hex}`}
-                      onClick={() => onUpdateProfile({ avatarColor: hex })}
-                      className={`w-5 h-5 rounded-full cursor-pointer border-2 ${
-                        profile.avatarColor === hex ? 'border-[var(--app-text)] scale-110' : 'border-transparent'
-                      }`}
-                      style={{ backgroundColor: hex }}
+                  {profile.avatarImage ? (
+                    <img
+                      src={profile.avatarImage}
+                      alt={profile.displayName}
+                      data-testid="profile-avatar-img"
+                      className="w-full h-full object-cover"
                     />
-                  ))}
+                  ) : (
+                    <div
+                      className="w-full h-full flex items-center justify-center text-2xl font-extrabold text-[#12160D]"
+                      style={{ backgroundColor: profile.avatarColor }}
+                    >
+                      {profile.displayName.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 text-white text-[11px] font-bold">
+                    <Camera className="w-5 h-5" />
+                    <span>Change</span>
+                  </span>
+                </button>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-[var(--app-accent)]" />
+                    <span>Upload Photo</span>
+                  </button>
+                  {profile.avatarImage && (
+                    <button
+                      type="button"
+                      aria-label="Remove profile photo"
+                      title="Remove Photo"
+                      onClick={() => {
+                        onUpdateProfile({ avatarImage: null });
+                        setAvatarUploadError(null);
+                      }}
+                      className="p-1.5 rounded-lg bg-[var(--app-surface-2)] hover:bg-[#C94A4A]/20 border border-[var(--app-border-strong)] text-[var(--app-text-muted)] hover:text-[#E04F4F] transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
+
+                {avatarUploadError && (
+                  <p className="text-[11px] text-[#E04F4F] text-center max-w-[160px]">{avatarUploadError}</p>
+                )}
+
+                {!profile.avatarImage && (
+                  <div className="flex items-center gap-1.5">
+                    {AVATAR_COLORS.map((hex) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        aria-label={`Select avatar color ${hex}`}
+                        onClick={() => onUpdateProfile({ avatarColor: hex })}
+                        className={`w-5 h-5 rounded-full cursor-pointer border-2 ${
+                          profile.avatarColor === hex ? 'border-[var(--app-text)] scale-110' : 'border-transparent'
+                        }`}
+                        style={{ backgroundColor: hex }}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               <form
@@ -957,7 +856,7 @@ export const MainHub: React.FC<MainHubProps> = ({
               key={item.id}
               type="button"
               aria-current={active ? 'page' : undefined}
-              onClick={() => onChangeSection(item.id)}
+              onClick={() => handleSelectNavSection(item.id)}
               className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-bold transition-colors cursor-pointer ${
                 active ? 'text-[var(--app-accent)]' : 'text-[var(--app-text-muted)]'
               }`}

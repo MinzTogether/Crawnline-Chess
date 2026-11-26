@@ -1,10 +1,37 @@
 import type { BoardThemeId } from './chess';
 
-export type AppThemeId = 'dark-slate' | 'midnight-emerald' | 'walnut-lounge' | 'light-classic';
+export type AppThemeId =
+  | 'dark-slate'
+  | 'midnight-emerald'
+  | 'walnut-lounge'
+  | 'light-classic'
+  | 'obsidian-cyber'
+  | 'deep-ocean'
+  | 'amethyst-velvet'
+  | 'crimson-noir'
+  | 'jade-temple'
+  | 'nordic-frost'
+  | 'desert-parchment'
+  | 'sakura-daylight'
+  | 'solar-amber'
+  | 'arctic-mint';
 
-export type AppIconId = 'crown' | 'knight' | 'shield' | 'rook' | 'queen' | 'star';
+export type AppIconId = 'crown' | 'knight' | 'shield' | 'rook' | 'queen' | 'star' | 'prism' | 'orbit';
 
-export type PieceStyleId = 'classic' | 'ivory' | 'gold';
+export type PieceStyleId =
+  | 'classic'
+  | 'ivory'
+  | 'gold'
+  | 'jade-crystal'
+  | 'sapphire-ice'
+  | 'crimson-ruby'
+  | 'obsidian-chrome'
+  | 'amethyst-dusk'
+  | 'rose-quartz'
+  | 'arctic-glass'
+  | 'vintage-cedar'
+  | 'emerald-mint'
+  | 'solar-bronze';
 
 export interface AppThemeMeta {
   id: AppThemeId;
@@ -29,25 +56,109 @@ export const APP_THEMES: AppThemeMeta[] = [
     id: 'midnight-emerald',
     name: 'Midnight Emerald',
     description: 'Deep club-room forest slate for long study sessions.',
-    swatchBg: '#111916',
-    swatchSurface: '#1A2621',
+    swatchBg: '#101714',
+    swatchSurface: '#192520',
     swatchAccent: '#6CC067',
   },
   {
     id: 'walnut-lounge',
     name: 'Walnut Lounge',
     description: 'Warm mahogany woodwork with rich amber highlights.',
-    swatchBg: '#1B1613',
-    swatchSurface: '#27201B',
+    swatchBg: '#1A1512',
+    swatchSurface: '#28211C',
     swatchAccent: '#D99B3C',
   },
   {
     id: 'light-classic',
     name: 'Light Classic',
     description: 'Bright daylight stone surface with clean dark ink.',
-    swatchBg: '#EEEDE8',
+    swatchBg: '#ECEAE4',
     swatchSurface: '#FFFFFF',
-    swatchAccent: '#5B9330',
+    swatchAccent: '#5D9432',
+    isLight: true,
+  },
+  {
+    id: 'obsidian-cyber',
+    name: 'Obsidian Cyan',
+    description: 'Futuristic matte obsidian paired with luminous frosted cyan.',
+    swatchBg: '#0D1318',
+    swatchSurface: '#152028',
+    swatchAccent: '#38D6DC',
+  },
+  {
+    id: 'deep-ocean',
+    name: 'Deep Ocean',
+    description: 'Abyssal marine indigo accented with bright electric sky.',
+    swatchBg: '#0E1522',
+    swatchSurface: '#172236',
+    swatchAccent: '#5AA9F5',
+  },
+  {
+    id: 'amethyst-velvet',
+    name: 'Amethyst Velvet',
+    description: 'Dark twilight plum balanced with soft luminous violet.',
+    swatchBg: '#171221',
+    swatchSurface: '#231C32',
+    swatchAccent: '#B184F5',
+  },
+  {
+    id: 'crimson-noir',
+    name: 'Crimson Noir',
+    description: 'Smoked graphite charcoal infused with regal ruby red.',
+    swatchBg: '#1A1214',
+    swatchSurface: '#271B1E',
+    swatchAccent: '#E55B69',
+  },
+  {
+    id: 'jade-temple',
+    name: 'Jade Sanctuary',
+    description: 'Frosted celadon dark slate with serene translucent jade.',
+    swatchBg: '#0E1918',
+    swatchSurface: '#162725',
+    swatchAccent: '#48D4A8',
+  },
+  {
+    id: 'solar-amber',
+    name: 'Solar Amber',
+    description: 'Roasted espresso carbon lit with molten championship gold.',
+    swatchBg: '#17140F',
+    swatchSurface: '#241F17',
+    swatchAccent: '#F0B43A',
+  },
+  {
+    id: 'nordic-frost',
+    name: 'Nordic Frost',
+    description: 'Crisp Scandinavian ice daylight with glacial cobalt accents.',
+    swatchBg: '#E6EEF5',
+    swatchSurface: '#F9FCFF',
+    swatchAccent: '#2F78C4',
+    isLight: true,
+  },
+  {
+    id: 'desert-parchment',
+    name: 'Desert Parchment',
+    description: 'Sunlit sandstone paper paired with warm terracotta bronze.',
+    swatchBg: '#F2E9DC',
+    swatchSurface: '#FFFBF4',
+    swatchAccent: '#C2673A',
+    isLight: true,
+  },
+  {
+    id: 'sakura-daylight',
+    name: 'Sakura Daylight',
+    description: 'Soft blossom pearl canvas accented with crisp rose berry.',
+    swatchBg: '#F5EBEF',
+    swatchSurface: '#FFFBFC',
+    swatchAccent: '#C44D78',
+    isLight: true,
+  },
+  {
+    id: 'arctic-mint',
+    name: 'Arctic Mint',
+    description: 'Translucent celadon daylight with bold botanical jade.',
+    swatchBg: '#E5F2EE',
+    swatchSurface: '#F7FCFA',
+    swatchAccent: '#1F9674',
     isLight: true,
   },
 ];
@@ -60,6 +171,8 @@ export interface PieceStyleMeta {
   blackFill: string;
   blackStroke: string;
   blackDetail: string;
+  pieceOpacity?: number;
+  glowColor?: string;
 }
 
 export const PIECE_STYLES: Record<PieceStyleId, PieceStyleMeta> = {
@@ -90,12 +203,109 @@ export const PIECE_STYLES: Record<PieceStyleId, PieceStyleMeta> = {
     blackStroke: '#101318',
     blackDetail: '#D9C284',
   },
+  'jade-crystal': {
+    id: 'jade-crystal',
+    name: 'Frosted Jade',
+    whiteFill: '#D9FAF0',
+    whiteStroke: '#185445',
+    blackFill: '#13473D',
+    blackStroke: '#07241E',
+    blackDetail: '#8CF2D4',
+    pieceOpacity: 0.94,
+    glowColor: 'rgba(72, 212, 168, 0.32)',
+  },
+  'sapphire-ice': {
+    id: 'sapphire-ice',
+    name: 'Sapphire Ice',
+    whiteFill: '#E3F2FF',
+    whiteStroke: '#1A4475',
+    blackFill: '#1B3B6B',
+    blackStroke: '#0B1D38',
+    blackDetail: '#99CEFF',
+    pieceOpacity: 0.95,
+    glowColor: 'rgba(90, 169, 245, 0.3)',
+  },
+  'crimson-ruby': {
+    id: 'crimson-ruby',
+    name: 'Crimson Ruby',
+    whiteFill: '#FFF0F0',
+    whiteStroke: '#5E1A22',
+    blackFill: '#6B1825',
+    blackStroke: '#300910',
+    blackDetail: '#FFABB6',
+  },
+  'obsidian-chrome': {
+    id: 'obsidian-chrome',
+    name: 'Obsidian Chrome',
+    whiteFill: '#E6ECEF',
+    whiteStroke: '#242D33',
+    blackFill: '#171C21',
+    blackStroke: '#080A0C',
+    blackDetail: '#A9C0CC',
+  },
+  'amethyst-dusk': {
+    id: 'amethyst-dusk',
+    name: 'Amethyst Dusk',
+    whiteFill: '#F3EBFF',
+    whiteStroke: '#3E2569',
+    blackFill: '#3B2361',
+    blackStroke: '#1C0E33',
+    blackDetail: '#D3B8FF',
+  },
+  'rose-quartz': {
+    id: 'rose-quartz',
+    name: 'Rose Quartz',
+    whiteFill: '#FFEBF2',
+    whiteStroke: '#662840',
+    blackFill: '#5E243B',
+    blackStroke: '#2E0F1B',
+    blackDetail: '#FFC2D7',
+  },
+  'arctic-glass': {
+    id: 'arctic-glass',
+    name: 'Arctic Glass',
+    whiteFill: '#EDF9FF',
+    whiteStroke: '#25607A',
+    blackFill: '#1D495C',
+    blackStroke: '#0B2430',
+    blackDetail: '#9CEBFF',
+    pieceOpacity: 0.9,
+    glowColor: 'rgba(56, 214, 220, 0.34)',
+  },
+  'vintage-cedar': {
+    id: 'vintage-cedar',
+    name: 'Vintage Cedar',
+    whiteFill: '#F7E7CE',
+    whiteStroke: '#4A2E19',
+    blackFill: '#54321B',
+    blackStroke: '#261409',
+    blackDetail: '#E3C39D',
+  },
+  'emerald-mint': {
+    id: 'emerald-mint',
+    name: 'Emerald Mint',
+    whiteFill: '#EBFCEB',
+    whiteStroke: '#1D4D26',
+    blackFill: '#1C4A27',
+    blackStroke: '#0B2411',
+    blackDetail: '#A7F0B6',
+  },
+  'solar-bronze': {
+    id: 'solar-bronze',
+    name: 'Solar Bronze',
+    whiteFill: '#FCECC7',
+    whiteStroke: '#4D340C',
+    blackFill: '#453013',
+    blackStroke: '#1F1406',
+    blackDetail: '#F5C969',
+  },
 };
 
 export interface UserProfile {
   displayName: string;
   title: string;
   avatarColor: string;
+  avatarImage?: string | null;
   bio: string;
 }
 
@@ -146,6 +356,7 @@ export const DEFAULT_PROFILE: UserProfile = {
   displayName: 'Club Challenger',
   title: 'Club Player',
   avatarColor: '#81B64C',
+  avatarImage: null,
   bio: 'Studying openings and reviewing every match with Stockfish.',
 };
 
