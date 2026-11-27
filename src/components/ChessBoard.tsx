@@ -163,7 +163,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
     if (allowedTurn !== 'both' && turn !== allowedTurn) return map;
 
     if (chess960Rights) {
-      const targets960 = getChess960LegalTargets(fen, chess960Rights, activeSource);
+      const targets960 = getChess960LegalTargets(effectiveFen, chess960Rights, activeSource);
       targets960.forEach((meta, targetSq) => {
         map.set(targetSq, {
           isCapture: meta.isCapture,
@@ -182,7 +182,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
       });
     }
     return map;
-  }, [activeSource, chess, fen, chess960Rights, interactive, allowedTurn, turn]);
+  }, [activeSource, chess, effectiveFen, chess960Rights, interactive, allowedTurn, turn]);
 
   const orderedRanks = orientation === 'w' ? RANKS : [...RANKS].reverse();
   const orderedFiles = orientation === 'w' ? FILES : [...FILES].reverse();
@@ -199,7 +199,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
     if (!piece) return false;
 
     if (chess960Rights) {
-      const targets960 = getChess960LegalTargets(fen, chess960Rights, from);
+      const targets960 = getChess960LegalTargets(effectiveFen, chess960Rights, from);
       const targetMeta = targets960.get(to);
       if (!targetMeta) return false;
 
@@ -285,6 +285,12 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
       return;
     }
     if (e.button !== 0 || pendingPromotion) return;
+
+    // When the King is already selected and the user clicks their own Rook to castle in Chess960,
+    // let handleSquareClick execute castling without initiating a rook drag.
+    if (selectedSquare && legalTargets.get(sq)?.isCastle) {
+      return;
+    }
 
     const piece = chess.get(sq);
     if (piece && canControlPiece(piece.color)) {

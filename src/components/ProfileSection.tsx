@@ -327,14 +327,18 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
                   <span>
                     {m.movesCount} {t('movesUnit')}
                   </span>
-                  {typeof m.whiteGameElo === 'number' && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="text-[var(--app-accent)]">
-                        {t('estEloPrefix')} {m.whiteGameElo} Elo
-                      </span>
-                    </>
-                  )}
+                  {(() => {
+                    const displayEstElo = m.userSide === 'b' ? m.blackGameElo : m.whiteGameElo;
+                    if (typeof displayEstElo !== 'number' || !Number.isFinite(displayEstElo)) return null;
+                    return (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="text-[var(--app-accent)]">
+                          {t('estEloPrefix')} {displayEstElo} Elo
+                        </span>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 

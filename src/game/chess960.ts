@@ -1,5 +1,6 @@
 import { Chess } from 'chess.js';
 import type { Color, PieceSymbol, Square } from 'chess.js';
+import type { MoveRecord } from '../types/chess';
 import { BOARD_FILES, fenToBoardMap, type BoardMap } from './customPosition';
 
 export interface Chess960CastlingRights {
@@ -172,13 +173,17 @@ export function createChess960Position(id?: number, rng: () => number = Math.ran
   }
 
   const backRank = getChess960BackRank(resolvedId);
+  const rookFiles: number[] = [];
+  backRank.forEach((p, idx) => {
+    if (p === 'r') rookFiles.push(idx);
+  });
 
-  // Castling is disabled outside Classic mode
+  // Full Chess.com / FIDE Chess960 castling rights (queenside rook = left, kingside rook = right)
   const castlingRights: Chess960CastlingRights = {
-    wK: null,
-    wQ: null,
-    bK: null,
-    bQ: null,
+    wQ: rookFiles[0] ?? null,
+    wK: rookFiles[1] ?? null,
+    bQ: rookFiles[0] ?? null,
+    bK: rookFiles[1] ?? null,
   };
 
   const blackRow = backRank.join('');
@@ -192,6 +197,119 @@ export function createChess960Position(id?: number, rng: () => number = Math.ran
     fen: baseFen,
     shredderFen,
     castlingRights,
+  };
+}
+
+export interface ParsedShredderFen {
+  ok: true;
+  /** chess.js-compatible FEN (castling field '-' so chess.js never rejects non-standard rook files) */
+  fen: string;
+  /** Normalized Shredder-FEN with explicit rook file letters (e.g. "HFhf") */
+  shredderFen: string;
+  castlingRights: Chess960CastlingRights;
+  /** True when input uses Shredder-FEN letters (A-H/a-h) or non-standard X-FEN king/rook squares */
+  isChess960Castling: boolean;
+}
+
+/**
+ * Parses standard FEN, Chess960 Shredder-FEN (e.g. "HFhf"), and Chess960 X-FEN ("KQkq" on
+ * non-standard king/rook squares) into a validated chess.js FEN plus explicit Chess960 castling rights.
+ */
+export function parseShredderFen(input: string): ParsedShredderFen | { ok: false; error: string } {
+  const trimmed = input.trim();
+  const parts = trimmed.split(/\s+/);
+  if (parts.length < 4 || parts.length > 6 || !parts[0].includes('/')) {
+    return { ok: false, error: 'Invalid FEN notation. Check piece placement and turn fields.' };
+  }
+
+  const rawCastling = parts[2];
+  if (rawCastling !== '-' && !/^[A-Ha-hKQkq]+$/.test(rawCastling)) {
+    return { ok: false, error: 'Invalid FEN castling field.' };
+  }
+
+  const normalizedParts = [
+    parts[0],
+    parts[1],
+    '-',
+    parts[3] || '-',
+    parts[4] || '0',
+    parts[5] || '1',
+  ];
+  const safeFenCandidate = normalizedParts.join(' ');
+
+  let chess: Chess;
+  try {
+    chess = new Chess(safeFenCandidate);
+  } catch {
+    return { ok: false, error: 'Invalid FEN notation. Check piece placement and turn fields.' };
+  }
+
+  const safeFen = chess.fen();
+  const rights: Chess960CastlingRights = { wK: null, wQ: null, bK: null, bQ: null };
+  const hasShredderLetters = /[A-Ha-h]/.test(rawCastling);
+
+  const wKingSq = findKingSquare(chess, 'w');
+  const bKingSq = findKingSquare(chess, 'b');
+  const wKingFile = wKingSq && wKingSq[1] === '1' ? fileIndex(wKingSq) : null;
+  const bKingFile = bKingSq && bKingSq[1] === '8' ? fileIndex(bKingSq) : null;
+
+  const findOutermostRook = (color: Color, side: 'k' | 'q', kingFile: number | null): number | null => {
+    if (kingFile === null) return null;
+    const rank: '1' | '8' = color === 'w' ? '1' : '8';
+    if (side === 'k') {
+      for (let f = 7; f > kingFile; f--) {
+        const p = chess.get(makeSquare(f, rank));
+        if (p && p.type === 'r' && p.color === color) return f;
+      }
+    } else {
+      for (let f = 0; f < kingFile; f++) {
+        const p = chess.get(makeSquare(f, rank));
+        if (p && p.type === 'r' && p.color === color) return f;
+      }
+    }
+    return null;
+  };
+
+  if (rawCastling !== '-') {
+    for (const ch of rawCastling) {
+      if (ch === 'K') {
+        rights.wK = findOutermostRook('w', 'k', wKingFile);
+      } else if (ch === 'Q') {
+        rights.wQ = findOutermostRook('w', 'q', wKingFile);
+      } else if (ch === 'k') {
+        rights.bK = findOutermostRook('b', 'k', bKingFile);
+      } else if (ch === 'q') {
+        rights.bQ = findOutermostRook('b', 'q', bKingFile);
+      } else if (ch >= 'A' && ch <= 'H') {
+        const f = ch.charCodeAt(0) - 65;
+        const p = chess.get(makeSquare(f, '1'));
+        if (wKingFile !== null && p && p.type === 'r' && p.color === 'w') {
+          if (f > wKingFile) rights.wK = f;
+          else if (f < wKingFile) rights.wQ = f;
+        }
+      } else if (ch >= 'a' && ch <= 'h') {
+        const f = ch.charCodeAt(0) - 97;
+        const p = chess.get(makeSquare(f, '8'));
+        if (bKingFile !== null && p && p.type === 'r' && p.color === 'b') {
+          if (f > bKingFile) rights.bK = f;
+          else if (f < bKingFile) rights.bQ = f;
+        }
+      }
+    }
+  }
+
+  const hasNonStandardCastleCoords =
+    (rights.wK !== null && (wKingFile !== 4 || rights.wK !== 7)) ||
+    (rights.wQ !== null && (wKingFile !== 4 || rights.wQ !== 0)) ||
+    (rights.bK !== null && (bKingFile !== 4 || rights.bK !== 7)) ||
+    (rights.bQ !== null && (bKingFile !== 4 || rights.bQ !== 0));
+
+  return {
+    ok: true,
+    fen: safeFen,
+    shredderFen: toShredderFen(safeFen, rights),
+    castlingRights: rights,
+    isChess960Castling: hasShredderLetters || hasNonStandardCastleCoords,
   };
 }
 
@@ -468,7 +586,13 @@ export function applyChess960Move(
       const afterChess = new Chess(check.fenAfter);
       const isCheckmate = afterChess.isCheckmate();
       const isCheck = afterChess.inCheck();
-      const isDraw = afterChess.isDraw();
+      const canOpponentCastle =
+        canCastleChess960(check.fenAfter, nextRights, 'k').legal ||
+        canCastleChess960(check.fenAfter, nextRights, 'q').legal;
+      const isDraw =
+        afterChess.isInsufficientMaterial() ||
+        afterChess.isDrawByFiftyMoves() ||
+        (afterChess.isStalemate() && !canOpponentCastle);
       const suffix = isCheckmate ? '#' : isCheck ? '+' : '';
       const san = `${chosen.castleSide === 'k' ? 'O-O' : 'O-O-O'}${suffix}`;
 
@@ -504,6 +628,13 @@ export function applyChess960Move(
 
   const fenAfter = chess.fen();
   const nextRights = updateChess960CastlingRights(rights, played.color, played.piece, played.from, played.to);
+  const canOpponentCastle =
+    canCastleChess960(fenAfter, nextRights, 'k').legal ||
+    canCastleChess960(fenAfter, nextRights, 'q').legal;
+  const isDraw =
+    chess.isInsufficientMaterial() ||
+    chess.isDrawByFiftyMoves() ||
+    (chess.isStalemate() && !canOpponentCastle);
 
   return {
     fenAfter,
@@ -515,14 +646,191 @@ export function applyChess960Move(
     to: played.to,
     piece: played.piece,
     color: played.color,
-    captured: played.captured,
+    captured: played.captured ?? (played.flags.includes('e') ? 'p' : undefined),
     promotion: played.promotion,
     isCastle: false,
     isCapture: Boolean(played.captured) || played.flags.includes('e'),
     isPromotion: played.flags.includes('p'),
     isCheck: chess.inCheck(),
     isCheckmate: chess.isCheckmate(),
-    isDraw: chess.isDraw(),
+    isDraw,
+  };
+}
+
+/**
+ * Applies a single SAN token (including Chess960 O-O / O-O-O) to a Chess960 position.
+ */
+export function applyChess960SanMove(
+  fen: string,
+  rights: Chess960CastlingRights,
+  sanToken: string
+): Chess960MoveResult | null {
+  const cleaned = sanToken.trim().replace(/[!?]+$/g, '');
+  if (!cleaned) return null;
+
+  const castleBase = cleaned.replace(/[+#]+$/g, '');
+  if (castleBase === 'O-O-O' || castleBase === '0-0-0') {
+    const check = canCastleChess960(fen, rights, 'q');
+    if (!check.legal || !check.kingFrom || !check.rookFrom) return null;
+    return applyChess960Move(fen, rights, check.kingFrom, check.rookFrom);
+  }
+  if (castleBase === 'O-O' || castleBase === '0-0') {
+    const check = canCastleChess960(fen, rights, 'k');
+    if (!check.legal || !check.kingFrom || !check.rookFrom) return null;
+    return applyChess960Move(fen, rights, check.kingFrom, check.rookFrom);
+  }
+
+  const chess = new Chess(fen);
+  let played;
+  try {
+    played = chess.move(cleaned);
+  } catch {
+    return null;
+  }
+  if (!played) return null;
+
+  const fenAfter = chess.fen();
+  const nextRights = updateChess960CastlingRights(rights, played.color, played.piece, played.from, played.to);
+  const canOpponentCastle =
+    canCastleChess960(fenAfter, nextRights, 'k').legal ||
+    canCastleChess960(fenAfter, nextRights, 'q').legal;
+  const isDraw =
+    chess.isInsufficientMaterial() ||
+    chess.isDrawByFiftyMoves() ||
+    (chess.isStalemate() && !canOpponentCastle);
+
+  return {
+    fenAfter,
+    shredderFenAfter: toShredderFen(fenAfter, nextRights),
+    castlingRightsAfter: nextRights,
+    san: played.san,
+    uci: `${played.from}${played.to}${played.promotion ?? ''}`,
+    from: played.from,
+    to: played.to,
+    piece: played.piece,
+    color: played.color,
+    captured: played.captured ?? (played.flags.includes('e') ? 'p' : undefined),
+    promotion: played.promotion,
+    isCastle: false,
+    isCapture: Boolean(played.captured) || played.flags.includes('e'),
+    isPromotion: played.flags.includes('p'),
+    isCheck: chess.inCheck(),
+    isCheckmate: chess.isCheckmate(),
+    isDraw,
+  };
+}
+
+/**
+ * Strips nested PGN variations "(...)", brace comments "{...}", and semicolon comments ";..."
+ * and returns the clean list of SAN move tokens.
+ */
+function extractPgnSanTokens(movetext: string): string[] {
+  let stripped = movetext.replace(/\{[^}]*\}/g, ' ').replace(/;[^\n]*/g, ' ');
+  // Remove nested parenthesized variations safely
+  let prev = '';
+  while (stripped !== prev) {
+    prev = stripped;
+    stripped = stripped.replace(/\([^()]*\)/g, ' ');
+  }
+  const rawTokens = stripped
+    .replace(/\$\d+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const moves: string[] = [];
+  for (const token of rawTokens) {
+    if (/^(1-0|0-1|1\/2-1\/2|\*)$/.test(token)) break;
+    // Strip leading move number prefixes like "1." or "12..."
+    const withoutNum = token.replace(/^\d+\.+/g, '');
+    if (!withoutNum || /^\.+$/.test(withoutNum)) continue;
+    moves.push(withoutNum);
+  }
+  return moves;
+}
+
+/**
+ * Parses a Chess960 PGN (supporting Shredder-FEN, X-FEN, and full Chess960 O-O / O-O-O moves)
+ * into a chess.js-safe initial FEN, initial Shredder-FEN, castling rights, and full MoveRecord list.
+ */
+export function parseChess960Pgn(input: string): {
+  ok: true;
+  initialFen: string;
+  initialShredderFen: string;
+  initialChess960Rights: Chess960CastlingRights;
+  moves: MoveRecord[];
+  variant: 'Chess960';
+} | {
+  ok: false;
+  error: string;
+} {
+  const headers: Record<string, string> = {};
+  const headerRegex = /^\s*\[([A-Za-z0-9_]+)\s+"([^"]*)"\]\s*$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = headerRegex.exec(input)) !== null) {
+    headers[match[1]] = match[2];
+  }
+
+  const body = input.replace(/^\s*\[[^\]]*\]\s*$/gm, '').trim();
+  const rawFen = headers['FEN'];
+  let curFen: string;
+  let initialShredderFen: string;
+  let curRights: Chess960CastlingRights;
+
+  if (rawFen) {
+    const parsedFen = parseShredderFen(rawFen);
+    if (!parsedFen.ok) {
+      return { ok: false, error: parsedFen.error };
+    }
+    curFen = parsedFen.fen;
+    initialShredderFen = parsedFen.shredderFen;
+    curRights = parsedFen.castlingRights;
+  } else {
+    const std518 = createChess960Position(518);
+    curFen = std518.fen;
+    initialShredderFen = std518.shredderFen;
+    curRights = std518.castlingRights;
+  }
+
+  const initialFen = curFen;
+  const initialChess960Rights: Chess960CastlingRights = { ...curRights };
+  const tokens = extractPgnSanTokens(body);
+  const records: MoveRecord[] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const fenBefore = curFen;
+    const moveNumber = parseInt(fenBefore.split(' ')[5] || '1', 10) || Math.floor(i / 2) + 1;
+    const applied = applyChess960SanMove(curFen, curRights, token);
+    if (!applied) {
+      return { ok: false, error: `Invalid Chess960 PGN move "${token}" at ply ${i + 1}.` };
+    }
+    records.push({
+      ply: i + 1,
+      moveNumber,
+      color: applied.color,
+      san: applied.san,
+      uci: applied.uci,
+      from: applied.from,
+      to: applied.to,
+      piece: applied.piece,
+      captured: applied.captured,
+      promotion: applied.promotion,
+      fenBefore,
+      fenAfter: applied.fenAfter,
+      engineFenAfter: applied.shredderFenAfter,
+      castlingRights960: applied.castlingRightsAfter,
+    });
+    curFen = applied.fenAfter;
+    curRights = applied.castlingRightsAfter;
+  }
+
+  return {
+    ok: true,
+    initialFen,
+    initialShredderFen,
+    initialChess960Rights,
+    moves: records,
+    variant: 'Chess960',
   };
 }
 

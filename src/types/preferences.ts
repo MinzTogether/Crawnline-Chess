@@ -841,8 +841,8 @@ export function sanitizeSavedMatches(raw: unknown): SavedMatch[] {
       pgn,
       whiteAccuracy: readNullableNumber(item.whiteAccuracy, 0, 100),
       blackAccuracy: readNullableNumber(item.blackAccuracy, 0, 100),
-      whiteGameElo: readNullableNumber(item.whiteGameElo, 100, 4000),
-      blackGameElo: readNullableNumber(item.blackGameElo, 100, 4000),
+      whiteGameElo: readNullableNumber(item.whiteGameElo, 400, 2900),
+      blackGameElo: readNullableNumber(item.blackGameElo, 400, 2900),
       userSide,
     });
     if (valid.length >= 25) break;

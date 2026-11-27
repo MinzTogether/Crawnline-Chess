@@ -91,6 +91,12 @@ export function parseBestMoveLine(line: string): { bestMove: string | null; pond
  * Computes White's expected winning percentage (0 to 100) using the standard logistic win-probability curve.
  */
 export function evalToWhiteWinProbability(score: EvalScore): number {
+  if (!score || typeof score.value !== 'number' || Number.isNaN(score.value)) {
+    return 50;
+  }
+  if (!Number.isFinite(score.value)) {
+    return score.value > 0 ? 100 : 0;
+  }
   if (score.type === 'mate') {
     if (score.value > 0) return 100;
     if (score.value < 0) return 0;
@@ -198,9 +204,16 @@ export function classifyMove(params: {
  * Computes average player accuracy across classified moves (0..100).
  */
 export function calculateAverageAccuracy(accuracies: number[]): number | null {
-  if (accuracies.length === 0) return null;
-  const sum = accuracies.reduce((acc, v) => acc + v, 0);
-  return Math.round((sum / accuracies.length) * 10) / 10;
+  if (!Array.isArray(accuracies) || accuracies.length === 0) return null;
+  let sum = 0;
+  let count = 0;
+  for (const v of accuracies) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    sum += Math.max(0, Math.min(100, v));
+    count += 1;
+  }
+  if (count === 0) return null;
+  return Math.round((sum / count) * 10) / 10;
 }
 
 /**

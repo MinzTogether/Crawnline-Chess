@@ -28,11 +28,11 @@ export function buildGameOverSummary(
   finalFen: string,
   termination: GameTermination
 ): GameOverSummary {
-  const report = buildMatchRatingReport(moves);
+  const report = buildMatchRatingReport(moves, { result: termination.resultString });
 
   let materialAdvantage = 0;
   try {
-    materialAdvantage = getMaterialSummary(finalFen).advantage;
+    materialAdvantage = getMaterialSummary(finalFen, { moves }).advantage;
   } catch {
     materialAdvantage = 0;
   }

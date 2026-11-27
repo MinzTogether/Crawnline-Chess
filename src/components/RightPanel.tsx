@@ -45,6 +45,8 @@ interface RightPanelProps {
   moves: MoveRecord[];
   viewPly: number;
   currentFen: string;
+  /** Optional FEN shown and copied in Library (Shredder-FEN for Chess960) */
+  displayFen?: string;
   opening: OpeningInfo | null;
   positionLabel?: string | null;
   whiteName: string;
@@ -58,8 +60,10 @@ interface RightPanelProps {
   showBestArrow: boolean;
   onToggleBestArrow: (show: boolean) => void;
   isGameOver: boolean;
+  resultString?: '1-0' | '0-1' | '1/2-1/2' | '*';
   isReviewing: boolean;
   reviewProgress: number;
+  reviewError?: string | null;
   onSelectPly: (ply: number) => void;
   onFlipBoard: () => void;
   onRequestHint: () => void;
@@ -68,6 +72,7 @@ interface RightPanelProps {
   onResign: () => void;
   onNewMatch: () => void;
   onRunGameReview: () => void;
+  onCancelGameReview?: () => void;
   onPlayEngineMove: (uciMove: string) => void;
   onImportPgnOrFen: (text: string) => { ok: boolean; error?: string };
   onImportAndRatePgn: (text: string) => { ok: boolean; error?: string };
@@ -142,6 +147,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   moves,
   viewPly,
   currentFen,
+  displayFen,
   opening,
   positionLabel,
   whiteName,
@@ -155,8 +161,10 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   showBestArrow,
   onToggleBestArrow,
   isGameOver,
+  resultString,
   isReviewing,
   reviewProgress,
+  reviewError = null,
   onSelectPly,
   onFlipBoard,
   onRequestHint,
@@ -165,6 +173,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   onResign,
   onNewMatch,
   onRunGameReview,
+  onCancelGameReview,
   onPlayEngineMove,
   onImportPgnOrFen,
   onImportAndRatePgn,
@@ -236,8 +245,10 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   const topScore = currentAnalysis?.lines[0]?.score ?? null;
   const whiteWinProb = topScore ? Math.round(evalToWhiteWinProbability(topScore)) : 50;
 
+  const shownFen = displayFen ?? currentFen;
+
   const handleCopy = async (kind: 'fen' | 'pgn') => {
-    const value = kind === 'fen' ? currentFen : pgnText;
+    const value = kind === 'fen' ? shownFen : pgnText;
     let copied = false;
     try {
       await navigator.clipboard.writeText(value);
@@ -615,10 +626,13 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
             viewPly={viewPly}
             whiteName={whiteName}
             blackName={blackName}
+            resultString={resultString}
             isReviewing={isReviewing}
             reviewProgress={reviewProgress}
+            reviewError={reviewError}
             liveEval={topScore}
             onRunGameReview={onRunGameReview}
+            onCancelGameReview={onCancelGameReview}
             onSelectPly={onSelectPly}
             onImportAndRatePgn={onImportAndRatePgn}
           />
@@ -783,8 +797,11 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
                   <span>{copiedType === 'fen' ? t('copied') : t('copyFen')}</span>
                 </button>
               </div>
-              <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-lg p-2.5 font-mono text-[11px] text-[var(--app-text-muted)] break-all">
-                {currentFen}
+              <div
+                data-testid="fen-display-text"
+                className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-lg p-2.5 font-mono text-[11px] text-[var(--app-text-muted)] break-all"
+              >
+                {shownFen}
               </div>
             </div>
 

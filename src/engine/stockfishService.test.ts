@@ -465,3 +465,183 @@ test('StockfishOpponent handles bot move, timeout, runtime error, cancel, and sa
   opponent.terminate();
   assert.equal(opponent.isRunning(), false);
 });
+
+// ---------- 5. Realtime vs Review Job Queue & Cancellation Invariants ----------
+
+test('StockfishAnalyzer preempts realtime analyzePosition (both during init and searching) for evaluateOnce with zero stale updates or orphaned jobs', async () => {
+  // Part A: analyzePosition awaiting delayed init() is superseded by evaluateOnce before init resolves
+  let resolveInit!: (worker: MockEventWorker) => void;
+  const bootWorker = new MockEventWorker('/mock/delayed-init.js');
+  const delayedFactory: StockfishWorkerFactory = async (callbacks) => {
+    const w = await new Promise<MockEventWorker>((resolve) => {
+      resolveInit = resolve;
+    });
+    w.addEventListener('message', callbacks.onMessage);
+    return {
+      worker: w,
+      backend: 'wasm',
+      disposeListeners: () => w.removeEventListener('message', callbacks.onMessage),
+    };
+  };
+
+  const analyzerA = new StockfishAnalyzer(delayedFactory);
+  const staleUpdatesA: number[] = [];
+  const streamPromiseA = analyzerA.analyzePosition(
+    START_FEN,
+    { depth: 14, multiPv: 2 },
+    (snap) => staleUpdatesA.push(snap.depth)
+  );
+  // Game Review starts before init() resolves (even without explicit stop())
+  const reviewEvalPromiseA = analyzerA.evaluateOnce(AFTER_E4_FEN, 10);
+
+  resolveInit(bootWorker);
+  await streamPromiseA;
+  await flushAsync();
+
+  // Only the review single-eval job should be scheduled; stale stream must never overwrite it
+  assert.equal(analyzerA.getQueueState().activeJobMode, 'single');
+  assert.equal(analyzerA.getQueueState().queuedJobMode, null);
+
+  bootWorker.emit('message', { data: 'readyok' });
+  bootWorker.emit('message', {
+    data: 'info depth 10 seldepth 12 multipv 1 score cp -28 nodes 800 nps 8000 pv c7c5',
+  });
+  bootWorker.emit('message', { data: 'bestmove c7c5' });
+
+  const reviewResA = await reviewEvalPromiseA;
+  assert.equal(reviewResA.status, 'completed');
+  if (reviewResA.status === 'completed') {
+    assert.deepEqual(reviewResA.score, { type: 'cp', value: 28 });
+  }
+  assert.equal(staleUpdatesA.length, 0);
+  assert.deepEqual(analyzerA.getQueueState(), {
+    phase: 'idle',
+    isRunning: true,
+    backend: 'wasm',
+    activeJobMode: null,
+    queuedJobMode: null,
+    pendingSyncCount: 0,
+  });
+  analyzerA.terminate();
+
+  // Part B: active searching realtime stream preempted cleanly by stop() + evaluateOnce
+  const harness = createBootedHarness();
+  const analyzerB = new StockfishAnalyzer(harness.factory);
+  const streamSnapshots: string[] = [];
+
+  await analyzerB.analyzePosition(START_FEN, { depth: 16, multiPv: 2 }, (snap) => {
+    streamSnapshots.push(`${snap.fen}@${snap.depth}`);
+  });
+  harness.latest().emit('message', { data: 'readyok' });
+  harness.latest().emit('message', {
+    data: 'info depth 10 seldepth 11 multipv 1 score cp 24 nodes 600 nps 6000 pv e2e4',
+  });
+  assert.equal(streamSnapshots.length, 1);
+  assert.equal(analyzerB.getQueueState().activeJobMode, 'stream');
+  assert.equal(analyzerB.getQueueState().phase, 'searching');
+
+  // Review starts while realtime search is actively searching
+  analyzerB.stop();
+  const singlePromise = analyzerB.evaluateOnce(AFTER_E4_FEN, 10);
+  await flushAsync();
+
+  assert.equal(analyzerB.getQueueState().phase, 'stopping');
+  assert.equal(analyzerB.getQueueState().queuedJobMode, 'single');
+
+  // Stale info line arriving before bestmove must NOT fire stream callback
+  harness.latest().emit('message', {
+    data: 'info depth 12 seldepth 14 multipv 1 score cp 99 nodes 900 nps 9000 pv d2d4',
+  });
+  assert.equal(streamSnapshots.length, 1);
+
+  // Stop completes -> single eval runs and finishes
+  harness.latest().emit('message', { data: 'bestmove e2e4' });
+  harness.latest().emit('message', { data: 'readyok' });
+  harness.latest().emit('message', {
+    data: 'info depth 10 seldepth 11 multipv 1 score cp -15 nodes 700 nps 7000 pv e7e5',
+  });
+  harness.latest().emit('message', { data: 'bestmove e7e5' });
+
+  const singleRes = await singlePromise;
+  assert.equal(singleRes.status, 'completed');
+  if (singleRes.status === 'completed') {
+    assert.deepEqual(singleRes.score, { type: 'cp', value: 15 });
+  }
+  assert.equal(streamSnapshots.length, 1);
+  assert.deepEqual(analyzerB.getQueueState(), {
+    phase: 'idle',
+    isRunning: true,
+    backend: 'wasm',
+    activeJobMode: null,
+    queuedJobMode: null,
+    pendingSyncCount: 0,
+  });
+
+  analyzerB.terminate();
+});
+
+test('StockfishAnalyzer.stop() during handleStopTimeout reboot cancels queued job cleanly without scheduling it onto restarted worker', async () => {
+  let bootIndex = 0;
+  let resolveSecondBoot!: (w: MockEventWorker) => void;
+  const workers: MockEventWorker[] = [];
+
+  const factory: StockfishWorkerFactory = async (callbacks) => {
+    bootIndex += 1;
+    if (bootIndex === 1) {
+      const w = new MockEventWorker('/mock/hung-1.js');
+      workers.push(w);
+      w.addEventListener('message', callbacks.onMessage);
+      return {
+        worker: w,
+        backend: 'wasm',
+        disposeListeners: () => w.removeEventListener('message', callbacks.onMessage),
+      };
+    }
+    const w = await new Promise<MockEventWorker>((resolve) => {
+      resolveSecondBoot = resolve;
+    });
+    workers.push(w);
+    w.addEventListener('message', callbacks.onMessage);
+    return {
+      worker: w,
+      backend: 'wasm',
+      disposeListeners: () => w.removeEventListener('message', callbacks.onMessage),
+    };
+  };
+
+  const analyzer = new StockfishAnalyzer(factory, { stopTimeoutMs: 30 });
+
+  // Start job 1 -> searching
+  const job1 = analyzer.evaluateOnce(START_FEN, 10);
+  await flushAsync();
+  workers[0].emit('message', { data: 'readyok' });
+
+  // Supersede with job 2 -> enters stopping phase; worker ignores stop -> triggers handleStopTimeout reboot
+  const job2 = analyzer.evaluateOnce(AFTER_E4_FEN, 10);
+  assert.equal((await job1).status, 'cancelled');
+
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(workers[0].terminated, true);
+
+  // User exits review / calls stop() while reboot init() is still pending
+  analyzer.stop();
+  const rebootedWorker = new MockEventWorker('/mock/rebooted-2.js');
+  resolveSecondBoot(rebootedWorker);
+  await flushAsync();
+
+  const job2Res = await job2;
+  assert.equal(job2Res.status, 'cancelled');
+  assert.equal(job2Res.score, null);
+  assert.equal(rebootedWorker.sent.length, 0);
+  assert.deepEqual(analyzer.getQueueState(), {
+    phase: 'idle',
+    isRunning: true,
+    backend: 'wasm',
+    activeJobMode: null,
+    queuedJobMode: null,
+    pendingSyncCount: 0,
+  });
+
+  analyzer.terminate();
+});
+

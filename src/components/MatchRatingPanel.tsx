@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Award, ChevronRight, Sparkles, Upload } from 'lucide-react';
+import { AlertCircle, Award, ChevronRight, RotateCcw, Sparkles, Upload, X } from 'lucide-react';
 import { CLASSIFICATION_META, type EvalScore, type MoveRecord } from '../types/chess';
-import { buildMatchRatingReport } from '../engine/matchRating';
+import { buildMatchRatingReport, type MatchResultString } from '../engine/matchRating';
 import { useI18n } from '../i18n/LanguageContext';
 import { EvalGraph } from './EvalGraph';
 import { MoveBadge } from './MoveBadge';
@@ -11,10 +11,13 @@ interface MatchRatingPanelProps {
   viewPly: number;
   whiteName: string;
   blackName: string;
+  resultString?: MatchResultString;
   isReviewing: boolean;
   reviewProgress: number;
+  reviewError?: string | null;
   liveEval?: EvalScore | null;
   onRunGameReview: () => void;
+  onCancelGameReview?: () => void;
   onSelectPly: (ply: number) => void;
   onImportAndRatePgn: (pgn: string) => { ok: boolean; error?: string };
 }
@@ -24,15 +27,21 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = React.memo(({
   viewPly,
   whiteName,
   blackName,
+  resultString,
   isReviewing,
   reviewProgress,
+  reviewError = null,
   liveEval,
   onRunGameReview,
+  onCancelGameReview,
   onSelectPly,
   onImportAndRatePgn,
 }) => {
   const { t, getClassificationLabel } = useI18n();
-  const report = useMemo(() => buildMatchRatingReport(moves), [moves]);
+  const report = useMemo(
+    () => buildMatchRatingReport(moves, resultString ? { result: resultString } : undefined),
+    [moves, resultString]
+  );
   const [showPgnBox, setShowPgnBox] = useState(false);
   const [pgnDraft, setPgnDraft] = useState('');
   const [pgnError, setPgnError] = useState<string | null>(null);
@@ -85,10 +94,23 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = React.memo(({
 
       {/* Live Progress Bar while Stockfish reviews all moves */}
       {isReviewing && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between text-xs text-[var(--app-text-muted)] font-mono tabular-nums">
-            <span>{t('evaluatingMoves')}</span>
-            <span>{reviewProgress}%</span>
+        <div className="flex flex-col gap-1.5" data-testid="review-progress-bar">
+          <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-text-muted)] font-mono tabular-nums">
+            <span className="truncate font-sans">{t('evaluatingMoves')}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <span>{reviewProgress}%</span>
+              {onCancelGameReview && (
+                <button
+                  type="button"
+                  data-testid="cancel-review-btn"
+                  onClick={onCancelGameReview}
+                  className="px-2 py-0.5 rounded bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-sans font-semibold text-[var(--app-text)] inline-flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                  <span>{t('cancel')}</span>
+                </button>
+              )}
+            </div>
           </div>
           <div className="w-full h-2 bg-[var(--app-surface-2)] rounded-full overflow-hidden">
             <div
@@ -99,48 +121,77 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = React.memo(({
         </div>
       )}
 
+      {/* Clean recovery banner when Stockfish hits an error or timeout mid-review */}
+      {!isReviewing && reviewError && (
+        <div
+          role="alert"
+          data-testid="review-error-banner"
+          className="rounded-lg bg-[#E04F4F]/10 border border-[#E04F4F]/35 px-3 py-2.5 flex items-center justify-between gap-2 text-xs"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="w-4 h-4 text-[#E04F4F] shrink-0" />
+            <span className="text-[var(--app-text)] leading-snug">{t('reviewFailed')}</span>
+          </div>
+          <button
+            type="button"
+            data-testid="retry-review-btn"
+            onClick={onRunGameReview}
+            disabled={moves.length === 0}
+            className="px-2.5 py-1 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-bold text-[var(--app-text)] inline-flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>{t('reviewRetry')}</span>
+          </button>
+        </div>
+      )}
+
       {/* Advantage Curve */}
       {moves.length > 0 && (
         <EvalGraph moves={moves} viewPly={viewPly} onSelectPly={onSelectPly} liveEval={liveEval} />
       )}
 
       {/* White vs Black Accuracy & Estimated Game Elo */}
-      <div className="grid grid-cols-2 gap-2.5">
-        <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-xl p-3 flex flex-col gap-1">
-          <div className="flex items-center justify-between gap-1">
-            <span className="text-xs font-semibold text-[var(--app-text)] truncate">{whiteName}</span>
-            <span className="text-xs font-mono font-extrabold text-[var(--app-accent)]">
-              {report.white.grade}
-            </span>
+      <div className="flex flex-col gap-1.5">
+        <div className="grid grid-cols-2 gap-2.5">
+          <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-xl p-3 flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs font-semibold text-[var(--app-text)] truncate">{whiteName}</span>
+              <span className="text-xs font-mono font-extrabold text-[var(--app-accent)]">
+                {report.white.grade}
+              </span>
+            </div>
+            <div className="text-2xl font-mono font-extrabold tabular-nums text-[var(--app-text)] leading-tight">
+              {report.white.accuracy !== null ? `${report.white.accuracy.toFixed(1)}%` : '—'}
+            </div>
+            <div className="flex items-center justify-between gap-1 text-[11px] text-[var(--app-text-muted)] font-mono tabular-nums pt-1 border-t border-[var(--app-border)]">
+              <span className="truncate font-sans">{t('gameElo')}</span>
+              <span className="font-bold text-[var(--app-text)] shrink-0" data-testid="match-rating-elo-w">
+                {report.white.estimatedElo !== null ? report.white.estimatedElo : '—'}
+              </span>
+            </div>
           </div>
-          <div className="text-2xl font-mono font-extrabold tabular-nums text-[var(--app-text)] leading-tight">
-            {report.white.accuracy !== null ? `${report.white.accuracy.toFixed(1)}%` : '—'}
-          </div>
-          <div className="flex items-center justify-between text-[11px] text-[var(--app-text-muted)] font-mono tabular-nums pt-1 border-t border-[var(--app-border)]">
-            <span>{t('gameElo')}</span>
-            <span className="font-bold text-[var(--app-text)]">
-              {report.white.estimatedElo !== null ? report.white.estimatedElo : '—'}
-            </span>
-          </div>
-        </div>
 
-        <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-xl p-3 flex flex-col gap-1">
-          <div className="flex items-center justify-between gap-1">
-            <span className="text-xs font-semibold text-[var(--app-text)] truncate">{blackName}</span>
-            <span className="text-xs font-mono font-extrabold text-[var(--app-accent)]">
-              {report.black.grade}
-            </span>
-          </div>
-          <div className="text-2xl font-mono font-extrabold tabular-nums text-[var(--app-text)] leading-tight">
-            {report.black.accuracy !== null ? `${report.black.accuracy.toFixed(1)}%` : '—'}
-          </div>
-          <div className="flex items-center justify-between text-[11px] text-[var(--app-text-muted)] font-mono tabular-nums pt-1 border-t border-[var(--app-border)]">
-            <span>{t('gameElo')}</span>
-            <span className="font-bold text-[var(--app-text)]">
-              {report.black.estimatedElo !== null ? report.black.estimatedElo : '—'}
-            </span>
+          <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-xl p-3 flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs font-semibold text-[var(--app-text)] truncate">{blackName}</span>
+              <span className="text-xs font-mono font-extrabold text-[var(--app-accent)]">
+                {report.black.grade}
+              </span>
+            </div>
+            <div className="text-2xl font-mono font-extrabold tabular-nums text-[var(--app-text)] leading-tight">
+              {report.black.accuracy !== null ? `${report.black.accuracy.toFixed(1)}%` : '—'}
+            </div>
+            <div className="flex items-center justify-between gap-1 text-[11px] text-[var(--app-text-muted)] font-mono tabular-nums pt-1 border-t border-[var(--app-border)]">
+              <span className="truncate font-sans">{t('gameElo')}</span>
+              <span className="font-bold text-[var(--app-text)] shrink-0" data-testid="match-rating-elo-b">
+                {report.black.estimatedElo !== null ? report.black.estimatedElo : '—'}
+              </span>
+            </div>
           </div>
         </div>
+        <p className="text-[10px] text-[var(--app-text-subtle)] leading-snug px-0.5" data-testid="est-elo-disclaimer">
+          {t('estEloDisclaimer')}
+        </p>
       </div>
 
       {/* Phase-by-Phase Ratings */}

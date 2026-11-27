@@ -69,6 +69,15 @@ export interface StockfishOpponentTimeouts {
   moveTimeoutMs?: number;
 }
 
+export interface AnalyzerQueueState {
+  phase: 'idle' | 'stopping' | 'syncing' | 'searching';
+  isRunning: boolean;
+  backend: StockfishBackend | null;
+  activeJobMode: 'stream' | 'single' | null;
+  queuedJobMode: 'stream' | 'single' | null;
+  pendingSyncCount: number;
+}
+
 const DEFAULT_WASM_URL = '/stockfish/stockfish.wasm.js';
 const DEFAULT_ASMJS_URL = '/stockfish/stockfish.js';
 
@@ -305,6 +314,7 @@ export class StockfishAnalyzer {
   private phase: 'idle' | 'stopping' | 'syncing' | 'searching' = 'idle';
   private pendingSyncCount = 0;
   private stopGeneration = 0;
+  private requestGeneration = 0;
   private lifecycleGeneration = 0;
   private activeJob: PendingJob | null = null;
   private queuedJob: PendingJob | null = null;
@@ -346,6 +356,17 @@ export class StockfishAnalyzer {
 
   isRunning(): boolean {
     return this.isReady && this.worker !== null;
+  }
+
+  getQueueState(): AnalyzerQueueState {
+    return {
+      phase: this.phase,
+      isRunning: this.isRunning(),
+      backend: this.backend,
+      activeJobMode: this.activeJob?.mode ?? null,
+      queuedJobMode: this.queuedJob?.mode ?? null,
+      pendingSyncCount: this.pendingSyncCount,
+    };
   }
 
   async init(): Promise<void> {
@@ -515,10 +536,19 @@ export class StockfishAnalyzer {
     this.destroyWorkerOnly();
     this.settleJobCancelled(lingeringActive, 'stop-timeout');
 
-    // If a newer job was waiting to start after stop, reboot cleanly and run it
+    // If a newer job was waiting to start after stop, reboot cleanly and run it unless cancelled/superseded meanwhile
     if (pendingQueued) {
+      const stopGen = this.stopGeneration;
+      const reqGen = this.requestGeneration;
       this.init()
         .then(() => {
+          if (this.stopGeneration !== stopGen || this.requestGeneration !== reqGen) {
+            this.settleJobCancelled(
+              pendingQueued,
+              this.stopGeneration !== stopGen ? 'stopped' : 'superseded'
+            );
+            return;
+          }
           if (this.worker) {
             this.scheduleJob(pendingQueued);
           } else {
@@ -526,6 +556,13 @@ export class StockfishAnalyzer {
           }
         })
         .catch((err) => {
+          if (this.stopGeneration !== stopGen || this.requestGeneration !== reqGen) {
+            this.settleJobCancelled(
+              pendingQueued,
+              this.stopGeneration !== stopGen ? 'stopped' : 'superseded'
+            );
+            return;
+          }
           this.failJob(
             pendingQueued,
             'error',
@@ -786,16 +823,17 @@ export class StockfishAnalyzer {
     onUpdate: (analysis: EngineAnalysis) => void,
     onError?: (error: Error) => void
   ): Promise<void> {
-    const gen = this.stopGeneration;
+    const stopGen = this.stopGeneration;
+    const reqGen = ++this.requestGeneration;
     try {
       await this.init();
     } catch (err) {
-      if (this.stopGeneration !== gen) return;
+      if (this.stopGeneration !== stopGen || this.requestGeneration !== reqGen) return;
       const error = toError(err, 'Stockfish failed to initialize');
       onError?.(error);
       throw error;
     }
-    if (!this.worker || this.stopGeneration !== gen) return;
+    if (!this.worker || this.stopGeneration !== stopGen || this.requestGeneration !== reqGen) return;
 
     this.scheduleJob({
       fen,
@@ -815,12 +853,18 @@ export class StockfishAnalyzer {
     depth = 11,
     options?: { chess960?: boolean; engineFen?: string; chess960Rights?: Chess960CastlingRights }
   ): Promise<EvaluateOnceResult> {
-    const gen = this.stopGeneration;
+    const stopGen = this.stopGeneration;
+    const reqGen = ++this.requestGeneration;
     try {
       await this.init();
     } catch (err) {
-      if (this.stopGeneration !== gen) {
-        return { status: 'cancelled', score: null, bestMove: null, reason: 'stopped-during-init' };
+      if (this.stopGeneration !== stopGen || this.requestGeneration !== reqGen) {
+        return {
+          status: 'cancelled',
+          score: null,
+          bestMove: null,
+          reason: this.stopGeneration !== stopGen ? 'stopped-during-init' : 'superseded-during-init',
+        };
       }
       return {
         status: 'error',
@@ -830,8 +874,13 @@ export class StockfishAnalyzer {
       };
     }
 
-    if (this.stopGeneration !== gen) {
-      return { status: 'cancelled', score: null, bestMove: null, reason: 'stopped-during-init' };
+    if (this.stopGeneration !== stopGen || this.requestGeneration !== reqGen) {
+      return {
+        status: 'cancelled',
+        score: null,
+        bestMove: null,
+        reason: this.stopGeneration !== stopGen ? 'stopped-during-init' : 'superseded-during-init',
+      };
     }
     if (!this.worker) {
       return {
@@ -858,6 +907,7 @@ export class StockfishAnalyzer {
 
   stop() {
     this.stopGeneration += 1;
+    this.requestGeneration += 1;
     this.clearEmitTimer();
     const queued = this.queuedJob;
     this.queuedJob = null;
@@ -881,6 +931,7 @@ export class StockfishAnalyzer {
 
   terminate() {
     this.stopGeneration += 1;
+    this.requestGeneration += 1;
     const queued = this.queuedJob;
     this.queuedJob = null;
     const active = this.activeJob;
@@ -1073,12 +1124,21 @@ export class StockfishOpponent {
     this.destroyWorkerOnly();
 
     if (queued) {
+      const gen = this.cancelGeneration;
       this.init()
         .then(() => {
+          if (this.cancelGeneration !== gen) {
+            queued.resolve(null);
+            return;
+          }
           this.pendingMove = queued;
           this.startPending();
         })
         .catch((err) => {
+          if (this.cancelGeneration !== gen) {
+            queued.resolve(null);
+            return;
+          }
           queued.reject(toError(err, 'Stockfish opponent restart failed after stop timeout'));
         });
     }

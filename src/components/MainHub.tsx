@@ -152,8 +152,12 @@ export const MainHub: React.FC<MainHubProps> = ({
 
       const acc = m.userSide === 'b' ? m.blackAccuracy : m.whiteAccuracy;
       const elo = m.userSide === 'b' ? m.blackGameElo : m.whiteGameElo;
-      if (typeof acc === 'number') accuracies.push(acc);
-      if (typeof elo === 'number' && elo > bestElo) bestElo = elo;
+      if (typeof acc === 'number' && Number.isFinite(acc)) {
+        accuracies.push(Math.max(0, Math.min(100, acc)));
+      }
+      if (typeof elo === 'number' && Number.isFinite(elo) && elo >= 400 && elo <= 2900 && elo > bestElo) {
+        bestElo = elo;
+      }
     }
 
     const avgAcc =
@@ -358,7 +362,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                   <>
                     <span aria-hidden="true">·</span>
                     <span className="text-[var(--app-accent)] font-bold">
-                      {t('peakElo')} {profileStats.bestElo} Elo
+                      {t('peakElo')}: {profileStats.bestElo}
                     </span>
                   </>
                 )}
@@ -1212,6 +1216,9 @@ export const MainHub: React.FC<MainHubProps> = ({
                     <div className="text-xs font-bold text-[var(--app-text)]">{t('chess960RulesTitle')}</div>
                     <p className="text-xs text-[var(--app-text-muted)] mt-1 leading-relaxed">
                       {t('chess960RulesDesc')}
+                    </p>
+                    <p className="text-[11px] font-semibold text-[var(--app-accent)] mt-1.5">
+                      {t('chess960CastleHint')}
                     </p>
                   </div>
 

@@ -1,6 +1,12 @@
 import { Chess } from 'chess.js';
 import type { Color, PieceSymbol, Square } from 'chess.js';
 import type { GameTermination, MoveRecord } from '../types/chess';
+import {
+  canCastleChess960,
+  parseChess960Pgn,
+  parseShredderFen,
+  type Chess960CastlingRights,
+} from './chess960';
 
 const PIECE_VALUES: Record<PieceSymbol, number> = {
   p: 1,
@@ -11,64 +17,144 @@ const PIECE_VALUES: Record<PieceSymbol, number> = {
   k: 0,
 };
 
-const STARTING_COUNTS: Record<PieceSymbol, number> = {
-  p: 8,
-  n: 2,
+const CAPTURE_ORDER: readonly PieceSymbol[] = ['q', 'r', 'b', 'n', 'p'];
+
+const CAPTURE_RANK: Record<PieceSymbol, number> = {
+  q: 0,
+  r: 1,
   b: 2,
-  r: 2,
-  q: 1,
-  k: 1,
+  n: 3,
+  p: 4,
+  k: 5,
 };
 
+export type PieceInventory = Record<PieceSymbol, number>;
+
+export interface SidePieceInventory {
+  w: PieceInventory;
+  b: PieceInventory;
+}
+
+export interface MaterialSummaryOptions {
+  /** Move history up to the displayed position (primary source of truth for captures) */
+  moves?: readonly MoveRecord[];
+  /** Explicit starting FEN (used only when moves is omitted) */
+  initialFen?: string;
+  /** Explicit starting inventory (used only when moves is omitted) */
+  initialInventory?: SidePieceInventory;
+}
+
 export interface MaterialSummary {
-  /** Pieces captured BY White (i.e. missing Black pieces) */
+  /** Pieces captured BY White (sorted q, r, b, n, p) */
   capturedByWhite: PieceSymbol[];
-  /** Pieces captured BY Black (i.e. missing White pieces) */
+  /** Pieces captured BY Black (sorted q, r, b, n, p) */
   capturedByBlack: PieceSymbol[];
   /** Positive means White leads in material; negative means Black leads */
   advantage: number;
+  /** Total on-board material value for White */
+  whiteMaterial: number;
+  /** Total on-board material value for Black */
+  blackMaterial: number;
 }
 
 /**
- * Computes captured pieces and material advantage directly from any FEN.
+ * Counts every piece currently on the board directly from a FEN placement string.
+ * Supports arbitrary Custom Positions, multiple promoted pieces, and Shredder-FENs.
  */
-export function getMaterialSummary(fen: string): MaterialSummary {
-  const chess = new Chess(fen);
-  const board = chess.board();
-  const whiteCounts: Record<PieceSymbol, number> = { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 };
-  const blackCounts: Record<PieceSymbol, number> = { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 };
+export function getPieceInventoryFromFen(fen: string): SidePieceInventory {
+  const w: PieceInventory = { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 };
+  const b: PieceInventory = { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 };
+  const placement = fen.trim().split(/\s+/)[0] ?? '';
 
-  let whiteMaterial = 0;
-  let blackMaterial = 0;
-
-  for (const row of board) {
-    for (const sq of row) {
-      if (!sq) continue;
-      if (sq.color === 'w') {
-        whiteCounts[sq.type] += 1;
-        whiteMaterial += PIECE_VALUES[sq.type];
+  for (const ch of placement) {
+    if (ch === '/' || (ch >= '1' && ch <= '8')) continue;
+    const lower = ch.toLowerCase() as PieceSymbol;
+    if (lower in w) {
+      if (ch === lower) {
+        b[lower] += 1;
       } else {
-        blackCounts[sq.type] += 1;
-        blackMaterial += PIECE_VALUES[sq.type];
+        w[lower] += 1;
       }
     }
   }
 
-  const order: PieceSymbol[] = ['q', 'r', 'b', 'n', 'p'];
-  const capturedByWhite: PieceSymbol[] = [];
-  const capturedByBlack: PieceSymbol[] = [];
+  return { w, b };
+}
 
-  for (const piece of order) {
-    const missingBlack = Math.max(0, STARTING_COUNTS[piece] - blackCounts[piece]);
-    for (let i = 0; i < missingBlack; i++) capturedByWhite.push(piece);
-    const missingWhite = Math.max(0, STARTING_COUNTS[piece] - whiteCounts[piece]);
-    for (let i = 0; i < missingWhite; i++) capturedByBlack.push(piece);
+function sumMaterialValue(inventory: PieceInventory): number {
+  return (
+    inventory.p * PIECE_VALUES.p +
+    inventory.n * PIECE_VALUES.n +
+    inventory.b * PIECE_VALUES.b +
+    inventory.r * PIECE_VALUES.r +
+    inventory.q * PIECE_VALUES.q
+  );
+}
+
+function inferCapturesFromInventory(
+  baseline: PieceInventory,
+  current: PieceInventory
+): PieceSymbol[] {
+  const captured: PieceSymbol[] = [];
+  let extraPromoted = 0;
+
+  for (const piece of ['q', 'r', 'b', 'n'] as const) {
+    if (current[piece] > baseline[piece]) {
+      extraPromoted += current[piece] - baseline[piece];
+    }
+  }
+
+  for (const piece of CAPTURE_ORDER) {
+    const rawMissing = Math.max(0, baseline[piece] - current[piece]);
+    const adjusted = piece === 'p' ? Math.max(0, rawMissing - extraPromoted) : rawMissing;
+    for (let i = 0; i < adjusted; i++) {
+      captured.push(piece);
+    }
+  }
+
+  return captured;
+}
+
+/**
+ * Computes captured pieces and on-board material advantage without assuming standard 32-piece starts.
+ * - On-board `advantage` always sums actual pieces currently on the board (including promotions & custom armies).
+ * - Captured pieces come strictly from `options.moves` (primary source of truth) or explicit
+ *   `options.initialInventory` / `options.initialFen`. Never infers captures against hardcoded default counts.
+ */
+export function getMaterialSummary(
+  fen: string,
+  options?: MaterialSummaryOptions
+): MaterialSummary {
+  const current = getPieceInventoryFromFen(fen);
+  const whiteMaterial = sumMaterialValue(current.w);
+  const blackMaterial = sumMaterialValue(current.b);
+
+  let capturedByWhite: PieceSymbol[] = [];
+  let capturedByBlack: PieceSymbol[] = [];
+
+  if (options?.moves !== undefined) {
+    for (const m of options.moves) {
+      if (!m.captured || m.captured === 'k') continue;
+      if (m.color === 'w') {
+        capturedByWhite.push(m.captured);
+      } else {
+        capturedByBlack.push(m.captured);
+      }
+    }
+    capturedByWhite.sort((a, b) => CAPTURE_RANK[a] - CAPTURE_RANK[b]);
+    capturedByBlack.sort((a, b) => CAPTURE_RANK[a] - CAPTURE_RANK[b]);
+  } else if (options?.initialInventory || options?.initialFen) {
+    const baseline = options.initialInventory ?? getPieceInventoryFromFen(options.initialFen!);
+    capturedByWhite = inferCapturesFromInventory(baseline.b, current.b);
+    capturedByBlack = inferCapturesFromInventory(baseline.w, current.w);
   }
 
   return {
     capturedByWhite,
     capturedByBlack,
     advantage: whiteMaterial - blackMaterial,
+    whiteMaterial,
+    blackMaterial,
   };
 }
 
@@ -244,7 +330,10 @@ function getRepetitionKey(fen: string): string {
   return parts.slice(0, 4).join(' ');
 }
 
-function hasThreefoldRepetitionInHistory(initialFen: string, moves: MoveRecord[]): boolean {
+export function hasThreefoldRepetitionInHistory(
+  initialFen: string,
+  moves: MoveRecord[]
+): boolean {
   const counts = new Map<string, number>();
   const bump = (fen: string): number => {
     const key = getRepetitionKey(fen);
@@ -255,7 +344,7 @@ function hasThreefoldRepetitionInHistory(initialFen: string, moves: MoveRecord[]
 
   bump(initialFen);
   for (const m of moves) {
-    if (bump(m.fenAfter) >= 3) {
+    if (bump(m.engineFenAfter ?? m.fenAfter) >= 3) {
       return true;
     }
   }
@@ -332,6 +421,9 @@ export function applyRuleMove(params: {
     blackKingMoved: nextBlackKingMoved,
   });
 
+  const capturedPiece: PieceSymbol | undefined =
+    played.captured ?? (played.flags.includes('e') ? 'p' : undefined);
+
   const nextMovesForCheck: MoveRecord[] = [
     ...moves,
     {
@@ -343,7 +435,7 @@ export function applyRuleMove(params: {
       from: played.from,
       to: played.to,
       piece: played.piece,
-      captured: played.captured,
+      captured: capturedPiece,
       promotion: played.promotion,
       fenBefore: sanitizedBaseFen,
       fenAfter,
@@ -365,10 +457,10 @@ export function applyRuleMove(params: {
     from: played.from,
     to: played.to,
     piece: played.piece,
-    captured: played.captured,
+    captured: capturedPiece,
     promotion: played.promotion,
     isCastle,
-    isCapture: Boolean(played.captured) || played.flags.includes('e'),
+    isCapture: Boolean(capturedPiece) || played.flags.includes('e'),
     isPromotion: played.flags.includes('p'),
     isCheck: game.inCheck(),
     isCheckmate: game.isCheckmate(),
@@ -383,9 +475,11 @@ export function applyRuleMove(params: {
 export function evaluateGameTermination(params: {
   fen: string;
   initialFen?: string;
+  initialEngineFen?: string;
   moves?: MoveRecord[];
   chess?: Chess;
   allowCastling?: boolean;
+  chess960Rights?: Chess960CastlingRights | null;
   timeoutLoser?: Color | null;
   resignedBy?: Color | null;
   agreedDraw?: boolean;
@@ -436,24 +530,29 @@ export function evaluateGameTermination(params: {
       resultString: winner === 'w' ? '1-0' : '0-1',
     };
   }
-  if (chess.isStalemate()) {
+  const canChess960Castle = Boolean(
+    params.chess960Rights &&
+      (canCastleChess960(params.fen, params.chess960Rights, 'k').legal ||
+        canCastleChess960(params.fen, params.chess960Rights, 'q').legal)
+  );
+  if (chess.isStalemate() && !canChess960Castle) {
     return { isOver: true, winner: 'draw', reason: 'Stalemate', resultString: '1/2-1/2' };
   }
+  const initialRepetitionFen =
+    params.initialEngineFen ??
+    (allowCastling ? startFen : stripCastlingRights(startFen, 'both'));
   if (
     chess.isThreefoldRepetition() ||
     (params.moves &&
       params.moves.length > 0 &&
-      hasThreefoldRepetitionInHistory(
-        allowCastling ? startFen : stripCastlingRights(startFen, 'both'),
-        params.moves
-      ))
+      hasThreefoldRepetitionInHistory(initialRepetitionFen, params.moves))
   ) {
     return { isOver: true, winner: 'draw', reason: 'Threefold repetition', resultString: '1/2-1/2' };
   }
   if (chess.isInsufficientMaterial()) {
     return { isOver: true, winner: 'draw', reason: 'Insufficient material', resultString: '1/2-1/2' };
   }
-  if (chess.isDraw()) {
+  if (chess.isDrawByFiftyMoves() || (chess.isDraw() && !canChess960Castle)) {
     return { isOver: true, winner: 'draw', reason: '50-move rule draw', resultString: '1/2-1/2' };
   }
 
@@ -466,6 +565,8 @@ export function evaluateGameTermination(params: {
 export function parsePgnOrFen(input: string): {
   ok: true;
   initialFen: string;
+  initialShredderFen?: string;
+  initialChess960Rights?: Chess960CastlingRights;
   moves: MoveRecord[];
   variant?: 'Chess960';
 } | {
@@ -480,6 +581,17 @@ export function parsePgnOrFen(input: string): {
   // Try FEN first if it looks like a single-line 4-6 field FEN string
   const fenParts = trimmed.split(/\s+/);
   if (fenParts.length >= 4 && fenParts.length <= 6 && fenParts[0].includes('/')) {
+    const parsedShredder = parseShredderFen(trimmed);
+    if (parsedShredder.ok && parsedShredder.isChess960Castling) {
+      return {
+        ok: true,
+        initialFen: parsedShredder.fen,
+        initialShredderFen: parsedShredder.shredderFen,
+        initialChess960Rights: parsedShredder.castlingRights,
+        moves: [],
+        variant: 'Chess960',
+      };
+    }
     try {
       const testChess = new Chess(trimmed);
       return { ok: true, initialFen: testChess.fen(), moves: [] };
@@ -488,18 +600,28 @@ export function parsePgnOrFen(input: string): {
     }
   }
 
-  // Otherwise try loading as PGN
+  // Detect Chess960 PGN via [Variant "Chess960"/"Fischerandom"] or Shredder/X-FEN header
+  const variantMatch = trimmed.match(/^\s*\[Variant\s+"([^"]+)"\]\s*$/im);
+  const fenHeaderMatch = trimmed.match(/^\s*\[FEN\s+"([^"]+)"\]\s*$/im);
+  const normalizedVariantHeader = (variantMatch?.[1] ?? '').trim().toLowerCase();
+  const isChess960Header =
+    normalizedVariantHeader === 'chess960' || normalizedVariantHeader === 'fischerandom';
+  const parsedHeaderFen = fenHeaderMatch ? parseShredderFen(fenHeaderMatch[1]) : null;
+  const hasChess960HeaderFen = Boolean(parsedHeaderFen?.ok && parsedHeaderFen.isChess960Castling);
+
+  if (isChess960Header || hasChess960HeaderFen) {
+    return parseChess960Pgn(trimmed);
+  }
+
+  // Otherwise try loading as Standard PGN via chess.js
   try {
     const pgnChess = new Chess();
     pgnChess.loadPgn(trimmed);
     const verboseHistory = pgnChess.history({ verbose: true });
 
-    // Extract custom starting FEN and variant headers if present
+    // Extract custom starting FEN header if present
     const headers = pgnChess.getHeaders();
     const startFen = headers['FEN'] || new Chess().fen();
-    const variantHeader = (headers['Variant'] ?? '').trim().toLowerCase();
-    const variant: 'Chess960' | undefined =
-      variantHeader === 'chess960' || variantHeader === 'fischerandom' ? 'Chess960' : undefined;
     const replay = new Chess(startFen);
     const records: MoveRecord[] = [];
 
@@ -521,14 +643,14 @@ export function parsePgnOrFen(input: string): {
         from: applied.from,
         to: applied.to,
         piece: applied.piece,
-        captured: applied.captured,
+        captured: applied.captured ?? (applied.flags.includes('e') ? 'p' : undefined),
         promotion: applied.promotion,
         fenBefore,
         fenAfter: replay.fen(),
       });
     });
 
-    return { ok: true, initialFen: startFen, moves: records, variant };
+    return { ok: true, initialFen: startFen, moves: records };
   } catch {
     return { ok: false, error: 'Could not parse input as valid FEN or PGN.' };
   }

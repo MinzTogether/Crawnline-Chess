@@ -73,6 +73,7 @@ export const PlayerBar: React.FC<PlayerBarProps> = React.memo(({
           <div className="arena-player-subrow flex items-center gap-1.5 min-h-[18px] text-xs text-[var(--app-text-muted)]">
             {capturedPieces.length > 0 ? (
               <span
+                data-testid={`player-captured-${color}`}
                 className="tracking-[-0.12em] text-sm leading-none text-[var(--app-text)] opacity-85"
                 aria-label="Captured pieces"
               >

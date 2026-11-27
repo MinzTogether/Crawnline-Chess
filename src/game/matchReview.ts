@@ -9,15 +9,22 @@ export type SinglePositionEvaluation = EvaluateOnceResult;
 
 export interface MatchReviewPassParams {
   initialFen: string;
+  /** Optional Shredder-FEN for Chess960 initial position evaluation */
+  initialEngineFen?: string;
   moves: MoveRecord[];
   isStandardVariant: boolean;
   depth?: number;
-  evaluatePosition: (fen: string, depth: number) => Promise<SinglePositionEvaluation>;
+  evaluatePosition: (
+    fen: string,
+    depth: number,
+    engineFen?: string
+  ) => Promise<SinglePositionEvaluation>;
   isCancelled: () => boolean;
   onMoveReviewed?: (payload: {
     reviewedMoves: MoveRecord[];
     progressPct: number;
     fen: string;
+    engineFen: string;
     score: EvalScore;
     depth: number;
   }) => void;
@@ -56,6 +63,7 @@ function getTerminalScoreIfGameOver(fen: string): { score: EvalScore; bestMove: 
  */
 export async function executeMatchReviewPass({
   initialFen,
+  initialEngineFen,
   moves,
   isStandardVariant,
   depth = 10,
@@ -79,7 +87,7 @@ export async function executeMatchReviewPass({
   } else {
     let initialRes: SinglePositionEvaluation;
     try {
-      initialRes = await evaluatePosition(initialFen, depth);
+      initialRes = await evaluatePosition(initialFen, depth, initialEngineFen ?? initialFen);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Engine evaluation failed';
       return {
@@ -110,6 +118,7 @@ export async function executeMatchReviewPass({
     }
 
     const move = reviewed[i];
+    const moveEngineFen = move.engineFenAfter ?? move.fenAfter;
     let afterEval: { score: EvalScore; bestMove: string | null };
     const terminalAfter = getTerminalScoreIfGameOver(move.fenAfter);
 
@@ -118,7 +127,7 @@ export async function executeMatchReviewPass({
     } else {
       let afterRes: SinglePositionEvaluation;
       try {
-        afterRes = await evaluatePosition(move.fenAfter, depth);
+        afterRes = await evaluatePosition(move.fenAfter, depth, moveEngineFen);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Engine evaluation failed';
         return {
@@ -172,6 +181,7 @@ export async function executeMatchReviewPass({
       reviewedMoves: [...reviewed],
       progressPct,
       fen: move.fenAfter,
+      engineFen: moveEngineFen,
       score: afterEval.score,
       depth,
     });

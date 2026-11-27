@@ -42,6 +42,7 @@ import {
   buildPgn,
   evaluateGameTermination,
   getMaterialSummary,
+  hasThreefoldRepetitionInHistory,
   isTacticalPieceSacrifice,
   parsePgnOrFen,
   stripCastlingRights,
@@ -58,7 +59,13 @@ import {
 } from './game/clock';
 import { executeMatchReviewPass } from './game/matchReview';
 import { generateRandomChessFen, generateStandardRandomFen } from './game/customPosition';
-import { createChess960Position } from './game/chess960';
+import {
+  applyChess960Move,
+  canCastleChess960,
+  createChess960Position,
+  toShredderFen,
+  type Chess960CastlingRights,
+} from './game/chess960';
 import { detectOpening } from './game/openings';
 import { playChessSound } from './utils/sound';
 import { resolveAnimationTokens } from './utils/animationConfig';
@@ -116,6 +123,7 @@ export default function App() {
   const [activeVariant, setActiveVariant] = useState<MatchVariant>('standard');
   const [activeRandomStyle, setActiveRandomStyle] = useState<RandomChessStyle>('all');
   const [activeChess960Id, setActiveChess960Id] = useState<number | null>(null);
+  const [initialChess960Rights, setInitialChess960Rights] = useState<Chess960CastlingRights | null>(null);
   const [positionLabel, setPositionLabel] = useState<string | null>(null);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(() =>
     getAutostartFlag() ? `match-${Date.now()}` : null
@@ -145,13 +153,15 @@ export default function App() {
   const [isBotThinking, setIsBotThinking] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewProgress, setReviewProgress] = useState(0);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const analyzerRef = useRef<StockfishAnalyzer | null>(null);
   const opponentRef = useRef<StockfishOpponent | null>(null);
   const latestAnalysisRef = useRef<EngineAnalysis | null>(null);
   const archivedMatchRef = useRef<string | null>(null);
   const reviewRunIdRef = useRef(0);
-  const delayedReviewTimerRef = useRef<number | null>(null);
+  const isReviewingRef = useRef(false);
+  const matchSessionIdRef = useRef(0);
   const evalCacheRef = useRef<Map<string, CachedEvalEntry>>(new Map());
   const displayedEvalRef = useRef<{ fen: string | null; score: EvalScore | null; depth: number }>({
     fen: null,
@@ -197,21 +207,18 @@ export default function App() {
 
   const cancelOngoingReview = useCallback(() => {
     reviewRunIdRef.current += 1;
-    if (delayedReviewTimerRef.current !== null) {
-      window.clearTimeout(delayedReviewTimerRef.current);
-      delayedReviewTimerRef.current = null;
-    }
+    isReviewingRef.current = false;
     analyzerRef.current?.stop();
     setIsReviewing(false);
+    setReviewProgress(0);
+    setReviewError(null);
   }, []);
 
   useEffect(() => {
     return () => {
       reviewRunIdRef.current += 1;
-      if (delayedReviewTimerRef.current !== null) {
-        window.clearTimeout(delayedReviewTimerRef.current);
-        delayedReviewTimerRef.current = null;
-      }
+      isReviewingRef.current = false;
+      matchSessionIdRef.current += 1;
       analyzerRef.current?.terminate();
       opponentRef.current?.terminate();
     };
@@ -251,6 +258,41 @@ export default function App() {
   const viewedFen = viewPly === 0 ? initialFen : moves[viewPly - 1]?.fenAfter ?? latestFen;
   const isViewingLatest = viewPly === moves.length;
 
+  const initialEngineFen = useMemo(
+    () => (isChess960 && initialChess960Rights ? toShredderFen(initialFen, initialChess960Rights) : initialFen),
+    [isChess960, initialFen, initialChess960Rights]
+  );
+
+  const viewedChess960Rights = useMemo<Chess960CastlingRights | null>(() => {
+    if (!isChess960 || !initialChess960Rights) return null;
+    if (viewPly === 0) return initialChess960Rights;
+    return moves[viewPly - 1]?.castlingRights960 ?? initialChess960Rights;
+  }, [isChess960, initialChess960Rights, viewPly, moves]);
+
+  const latestChess960Rights = useMemo<Chess960CastlingRights | null>(() => {
+    if (!isChess960 || !initialChess960Rights) return null;
+    if (moves.length === 0) return initialChess960Rights;
+    return moves[moves.length - 1]?.castlingRights960 ?? initialChess960Rights;
+  }, [isChess960, initialChess960Rights, moves]);
+
+  const viewedEngineFen = useMemo(() => {
+    if (!isChess960) return viewedFen;
+    if (viewPly === 0) return initialEngineFen;
+    return (
+      moves[viewPly - 1]?.engineFenAfter ??
+      (viewedChess960Rights ? toShredderFen(viewedFen, viewedChess960Rights) : viewedFen)
+    );
+  }, [isChess960, viewPly, initialEngineFen, moves, viewedChess960Rights, viewedFen]);
+
+  const latestEngineFen = useMemo(() => {
+    if (!isChess960) return latestFen;
+    if (moves.length === 0) return initialEngineFen;
+    return (
+      moves[moves.length - 1]?.engineFenAfter ??
+      (latestChess960Rights ? toShredderFen(latestFen, latestChess960Rights) : latestFen)
+    );
+  }, [isChess960, moves, initialEngineFen, latestChess960Rights, latestFen]);
+
   // Primitive turn/FEN signals decouple bot-turn, clock, and analyzer effects from evalAfter updates.
   const latestTurn = useMemo<Color>(() => (latestFen.split(' ')[1] === 'b' ? 'b' : 'w'), [latestFen]);
   const viewedTurn = useMemo<Color>(() => (viewedFen.split(' ')[1] === 'b' ? 'b' : 'w'), [viewedFen]);
@@ -273,14 +315,27 @@ export default function App() {
       evaluateGameTermination({
         fen: latestFen,
         initialFen,
+        initialEngineFen,
         moves,
         chess: latestChess,
         allowCastling,
+        chess960Rights: latestChess960Rights,
         timeoutLoser,
         resignedBy,
         agreedDraw,
       }),
-    [latestFen, initialFen, moves, latestChess, allowCastling, timeoutLoser, resignedBy, agreedDraw]
+    [
+      latestFen,
+      initialFen,
+      initialEngineFen,
+      moves,
+      latestChess,
+      allowCastling,
+      latestChess960Rights,
+      timeoutLoser,
+      resignedBy,
+      agreedDraw,
+    ]
   );
 
   const opening = useMemo(() => {
@@ -294,7 +349,14 @@ export default function App() {
     [moves, activeVariant]
   );
 
-  const material = useMemo(() => getMaterialSummary(viewedFen), [viewedFen]);
+  const material = useMemo(
+    () =>
+      getMaterialSummary(viewedFen, {
+        initialFen,
+        moves: viewPly === moves.length ? moves : moves.slice(0, viewPly),
+      }),
+    [viewedFen, initialFen, moves, viewPly]
+  );
 
   const whiteAccuracy = useMemo(
     () =>
@@ -363,9 +425,9 @@ export default function App() {
         blackName,
         result: termination.resultString,
         variant: isChess960 ? 'Chess960' : undefined,
-        pgnInitialFen: initialFen,
+        pgnInitialFen: isChess960 ? initialEngineFen : initialFen,
       }),
-    [initialFen, isChess960, moves, whiteName, blackName, termination.resultString]
+    [initialFen, initialEngineFen, isChess960, moves, whiteName, blackName, termination.resultString]
   );
 
   // Start / Restart a match
@@ -384,6 +446,7 @@ export default function App() {
       let resolvedLabel: string | null = null;
       let resolvedRandomStyle: RandomChessStyle = cfg.randomStyle ?? 'all';
       let resolved960Id: number | null = null;
+      let resolved960Rights: Chess960CastlingRights | null = null;
 
       if (variant === 'random') {
         resolvedFen =
@@ -397,6 +460,7 @@ export default function App() {
         const pos960 = createChess960Position(cfg.chess960Id ?? undefined);
         resolvedFen = pos960.fen;
         resolved960Id = pos960.id;
+        resolved960Rights = pos960.castlingRights;
         resolvedLabel = `Chess960 #${pos960.id}`;
       } else if (variant === 'custom' && cfg.customFen) {
         try {
@@ -408,11 +472,13 @@ export default function App() {
         }
       }
 
-      // Castling is only allowed in Classic ('standard') mode
-      if (variant !== 'standard') {
+      // Random and Custom modes strip castling rights; Standard uses standard FEN rights;
+      // Chess960 tracks full Shredder-FEN castling rights via initialChess960Rights.
+      if (variant === 'random' || variant === 'custom') {
         resolvedFen = stripCastlingRights(resolvedFen, 'both');
       }
 
+      matchSessionIdRef.current += 1;
       cancelOngoingReview();
       if (cfg.mode === 'stockfish') {
         opponentRef.current?.cancel();
@@ -425,6 +491,7 @@ export default function App() {
       setActiveVariant(variant);
       setActiveRandomStyle(resolvedRandomStyle);
       setActiveChess960Id(resolved960Id);
+      setInitialChess960Rights(resolved960Rights);
       setHumanColor(chosenSide);
       setOrientation(chosenSide);
       setInitialFen(resolvedFen);
@@ -443,7 +510,10 @@ export default function App() {
       setReviewProgress(0);
       setEngineAnalysis(null);
       displayedEvalRef.current = {
-        fen: resolvedFen,
+        fen:
+          variant === 'chess960' && resolved960Rights
+            ? toShredderFen(resolvedFen, resolved960Rights)
+            : resolvedFen,
         score: { type: 'cp', value: variant === 'standard' ? 20 : 0 },
         depth: 0,
       };
@@ -502,22 +572,99 @@ export default function App() {
       const bestBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.bestMoveUci ?? undefined : undefined;
       const evalBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.lines[0]?.score : undefined;
 
-      const applied = applyRuleMove({
-        initialFen,
-        moves: baseMoves,
-        from,
-        to,
-        promotion,
-        allowCastling,
-      });
+      let newRecord: MoveRecord;
+      let movedColor: Color;
+      let gameEnded: boolean;
+      let soundKind: 'gameover' | 'check' | 'promote' | 'castle' | 'capture' | 'move';
 
-      if (!applied) {
-        playChessSound('illegal', preferences.muted);
-        return false;
+      if (isChess960 && initialChess960Rights) {
+        const baseRights =
+          baseMoves.length > 0
+            ? baseMoves[baseMoves.length - 1].castlingRights960 ?? initialChess960Rights
+            : initialChess960Rights;
+        const moveNumber =
+          parseInt(baseFen.split(' ')[5] || '1', 10) || Math.floor(baseMoves.length / 2) + 1;
+        const applied960 = applyChess960Move(baseFen, baseRights, from, to, promotion);
+        if (!applied960) {
+          playChessSound('illegal', preferences.muted);
+          return false;
+        }
+        movedColor = applied960.color;
+        newRecord = {
+          ply: baseMoves.length + 1,
+          moveNumber,
+          color: applied960.color,
+          san: applied960.san,
+          uci: applied960.uci,
+          from: applied960.from,
+          to: applied960.to,
+          piece: applied960.piece,
+          captured: applied960.captured,
+          promotion: applied960.promotion,
+          fenBefore: baseFen,
+          fenAfter: applied960.fenAfter,
+          engineFenAfter: applied960.shredderFenAfter,
+          castlingRights960: applied960.castlingRightsAfter,
+          bestMoveBefore: bestBefore,
+        };
+        const isThreefold = hasThreefoldRepetitionInHistory(initialEngineFen, [...baseMoves, newRecord]);
+        gameEnded = applied960.isCheckmate || applied960.isDraw || isThreefold;
+        soundKind = gameEnded
+          ? 'gameover'
+          : applied960.isCheck
+            ? 'check'
+            : applied960.isPromotion
+              ? 'promote'
+              : applied960.isCastle
+                ? 'castle'
+                : applied960.isCapture
+                  ? 'capture'
+                  : 'move';
+      } else {
+        const applied = applyRuleMove({
+          initialFen,
+          moves: baseMoves,
+          from,
+          to,
+          promotion,
+          allowCastling,
+        });
+
+        if (!applied) {
+          playChessSound('illegal', preferences.muted);
+          return false;
+        }
+
+        movedColor = applied.color;
+        gameEnded = applied.isCheckmate || applied.isDraw;
+        newRecord = {
+          ply: baseMoves.length + 1,
+          moveNumber: applied.moveNumber,
+          color: applied.color,
+          san: applied.san,
+          uci: applied.uci,
+          from: applied.from,
+          to: applied.to,
+          piece: applied.piece,
+          captured: applied.captured,
+          promotion: applied.promotion,
+          fenBefore: applied.fenBefore,
+          fenAfter: applied.fenAfter,
+          bestMoveBefore: bestBefore,
+        };
+        soundKind =
+          applied.isCheckmate || applied.isDraw
+            ? 'gameover'
+            : applied.isCheck
+              ? 'check'
+              : applied.isPromotion
+                ? 'promote'
+                : applied.isCastle
+                  ? 'castle'
+                  : applied.isCapture
+                    ? 'capture'
+                    : 'move';
       }
-
-      const movedColor = applied.color;
-      const gameEnded = applied.isCheckmate || applied.isDraw;
 
       // Compute & verify final clock commit BEFORE mutating moves state
       let committedClock: ClockState | null = null;
@@ -542,35 +689,6 @@ export default function App() {
         committedClock = nextState;
       }
 
-      const newRecord: MoveRecord = {
-        ply: baseMoves.length + 1,
-        moveNumber: applied.moveNumber,
-        color: applied.color,
-        san: applied.san,
-        uci: applied.uci,
-        from: applied.from,
-        to: applied.to,
-        piece: applied.piece,
-        captured: applied.captured,
-        promotion: applied.promotion,
-        fenBefore: applied.fenBefore,
-        fenAfter: applied.fenAfter,
-        bestMoveBefore: bestBefore,
-      };
-
-      const soundKind: 'gameover' | 'check' | 'promote' | 'castle' | 'capture' | 'move' =
-        applied.isCheckmate || applied.isDraw
-          ? 'gameover'
-          : applied.isCheck
-            ? 'check'
-            : applied.isPromotion
-              ? 'promote'
-              : applied.isCastle
-                ? 'castle'
-                : applied.isCapture
-                  ? 'capture'
-                  : 'move';
-
       const nextMoves = [...baseMoves, newRecord];
       if (evalBefore && nextMoves.length >= 2 && !nextMoves[nextMoves.length - 2].evalAfter) {
         nextMoves[nextMoves.length - 2] = {
@@ -579,7 +697,7 @@ export default function App() {
         };
       }
 
-      if (isReviewing) {
+      if (isReviewing || isReviewingRef.current) {
         cancelOngoingReview();
       }
       if (committedClock !== null) {
@@ -598,6 +716,9 @@ export default function App() {
       appState,
       activeMode,
       allowCastling,
+      isChess960,
+      initialChess960Rights,
+      initialEngineFen,
       termination.isOver,
       isViewingLatest,
       moves,
@@ -620,7 +741,7 @@ export default function App() {
 
       if (moves.length >= 2 && activeMatchId && archivedMatchRef.current !== activeMatchId) {
         archivedMatchRef.current = activeMatchId;
-        const report = buildMatchRatingReport(moves);
+        const report = buildMatchRatingReport(moves, { result: termination.resultString });
         const entry: SavedMatch = {
           id: activeMatchId,
           date: new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
@@ -673,9 +794,18 @@ export default function App() {
     }
 
     let cancelled = false;
+    const sessionId = matchSessionIdRef.current;
     const analyzer = ensureAnalyzer();
 
-    if (viewedBoardChess.isGameOver()) {
+    const canViewedCastle960 =
+      isChess960 &&
+      viewedChess960Rights !== null &&
+      (canCastleChess960(viewedFen, viewedChess960Rights, 'k').legal ||
+        canCastleChess960(viewedFen, viewedChess960Rights, 'q').legal);
+    const isViewedPositionOver =
+      viewedBoardChess.isGameOver() && !(viewedBoardChess.isStalemate() && canViewedCastle960);
+
+    if (isViewedPositionOver) {
       const mateScore: EvalScore = viewedBoardChess.isCheckmate()
         ? { type: 'mate', value: viewedBoardChess.turn() === 'w' ? -1 : 1 }
         : { type: 'cp', value: 0 };
@@ -709,16 +839,18 @@ export default function App() {
         {
           depth: preferences.analysisDepth,
           multiPv: preferences.multiPv,
-          chess960: false,
-          engineFen: viewedFen,
+          chess960: isChess960,
+          engineFen: viewedEngineFen,
+          chess960Rights: viewedChess960Rights ?? undefined,
         },
         (snapshot) => {
-          if (cancelled) return;
+          if (cancelled || isReviewingRef.current || matchSessionIdRef.current !== sessionId) return;
           setEngineAnalysis(snapshot);
 
           if (snapshot.depth >= 10 && snapshot.lines[0]?.score) {
             const score = snapshot.lines[0].score;
             setMoves((prev) => {
+              if (isReviewingRef.current || matchSessionIdRef.current !== sessionId) return prev;
               // Prefer the exact viewed ply so repeated positions update the right move
               let idx = viewPly - 1;
               if (idx < 0 || idx >= prev.length || prev[idx].fenAfter !== snapshot.fen) {
@@ -767,13 +899,13 @@ export default function App() {
           }
         },
         () => {
-          if (cancelled) return;
+          if (cancelled || isReviewingRef.current || matchSessionIdRef.current !== sessionId) return;
           // Engine fault: stop spinning indicator without injecting any fake 0.00 evaluation
           setEngineAnalysis((prev) => (prev ? { ...prev, isSearching: false } : prev));
         }
       )
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || isReviewingRef.current || matchSessionIdRef.current !== sessionId) return;
         setEngineAnalysis((prev) => (prev ? { ...prev, isSearching: false } : prev));
       });
 
@@ -785,6 +917,9 @@ export default function App() {
     engineEnabled,
     isReviewing,
     viewedFen,
+    viewedEngineFen,
+    viewedChess960Rights,
+    isChess960,
     viewPly,
     viewedBoardChess,
     activeVariant,
@@ -810,7 +945,7 @@ export default function App() {
     const startedAt = performance.now();
 
     opponent
-      .computeMove(latestFen, activeLevel, false)
+      .computeMove(latestEngineFen, activeLevel, isChess960)
       .then((uciMove) => {
         if (cancelled || !uciMove || uciMove.length < 4) return;
         const elapsed = performance.now() - startedAt;
@@ -845,7 +980,8 @@ export default function App() {
     isViewingLatest,
     humanColor,
     latestTurn,
-    latestFen,
+    latestEngineFen,
+    isChess960,
     activeLevel,
     ensureOpponent,
     applyMove,
@@ -916,33 +1052,47 @@ export default function App() {
       targetInitialFen: string,
       targetMoves: MoveRecord[],
       matchIdToUpdate?: string | null,
-      isStandardVariant = activeVariant === 'standard'
+      targetVariant: MatchVariant = activeVariant,
+      targetInitialRights: Chess960CastlingRights | null = initialChess960Rights
     ) => {
       if (targetMoves.length === 0) return;
       reviewRunIdRef.current += 1;
       const runId = reviewRunIdRef.current;
+      isReviewingRef.current = true;
 
       setIsReviewing(true);
       setReviewProgress(0);
+      setReviewError(null);
       setRightTab('rating');
+      setEngineAnalysis((prev) => (prev ? { ...prev, isSearching: false } : prev));
+
+      const targetIsStandard = targetVariant === 'standard';
+      const targetIsChess960 = targetVariant === 'chess960';
+      const targetInitialEngineFen =
+        targetIsChess960 && targetInitialRights
+          ? toShredderFen(targetInitialFen, targetInitialRights)
+          : targetInitialFen;
 
       const analyzer = ensureAnalyzer();
+      // Cancel any in-flight realtime search or prior review job before starting this review pass
+      analyzer.stop();
 
       try {
         const result = await executeMatchReviewPass({
           initialFen: targetInitialFen,
+          initialEngineFen: targetInitialEngineFen,
           moves: targetMoves,
-          isStandardVariant,
+          isStandardVariant: targetIsStandard,
           depth: 10,
-          evaluatePosition: (fen, depth) =>
+          evaluatePosition: (fen, depth, engineFen) =>
             analyzer.evaluateOnce(fen, depth, {
-              chess960: false,
-              engineFen: fen,
+              chess960: targetIsChess960,
+              engineFen: engineFen ?? fen,
             }),
           isCancelled: () => reviewRunIdRef.current !== runId,
-          onMoveReviewed: ({ reviewedMoves, progressPct, fen, score, depth }) => {
+          onMoveReviewed: ({ reviewedMoves, progressPct, engineFen, score, depth }) => {
             if (reviewRunIdRef.current !== runId) return;
-            const cacheKey = positionKeyFromFen(fen);
+            const cacheKey = positionKeyFromFen(engineFen);
             if (evalCacheRef.current.has(cacheKey)) {
               evalCacheRef.current.delete(cacheKey);
             } else if (evalCacheRef.current.size >= MAX_EVAL_CACHE_SIZE) {
@@ -955,36 +1105,49 @@ export default function App() {
           },
         });
 
-        // Update saved match entry with exact Stockfish accuracy & Game Elo
-        if (result.completed && matchIdToUpdate && reviewRunIdRef.current === runId) {
-          const report = buildMatchRatingReport(result.reviewedMoves);
+        if (reviewRunIdRef.current !== runId) return;
+
+        if (result.error) {
+          setReviewError(result.error);
+          setReviewProgress(0);
+          return;
+        }
+
+        // Update saved match entry with exact Stockfish accuracy & Estimated Game Elo
+        if (result.completed && matchIdToUpdate) {
           setSavedMatches((prev) =>
-            prev.map((item) =>
-              item.id === matchIdToUpdate
-                ? {
-                    ...item,
-                    whiteAccuracy: report.white.accuracy,
-                    blackAccuracy: report.black.accuracy,
-                    whiteGameElo: report.white.estimatedElo,
-                    blackGameElo: report.black.estimatedElo,
-                  }
-                : item
-            )
+            prev.map((item) => {
+              if (item.id !== matchIdToUpdate) return item;
+              const report = buildMatchRatingReport(result.reviewedMoves, { result: item.result });
+              return {
+                ...item,
+                whiteAccuracy: report.white.accuracy,
+                blackAccuracy: report.black.accuracy,
+                whiteGameElo: report.white.estimatedElo,
+                blackGameElo: report.black.estimatedElo,
+              };
+            })
           );
+        }
+      } catch (err) {
+        if (reviewRunIdRef.current === runId) {
+          setReviewError(err instanceof Error ? err.message : 'Stockfish engine error');
+          setReviewProgress(0);
         }
       } finally {
         if (reviewRunIdRef.current === runId) {
+          isReviewingRef.current = false;
           setIsReviewing(false);
         }
       }
     },
-    [ensureAnalyzer, activeVariant]
+    [ensureAnalyzer, activeVariant, initialChess960Rights]
   );
 
   const handleRunGameReview = useCallback(() => {
-    if (moves.length === 0 || isReviewing) return;
-    runMatchRatingPass(initialFen, moves, activeMatchId, activeVariant === 'standard');
-  }, [moves, isReviewing, runMatchRatingPass, initialFen, activeMatchId, activeVariant]);
+    if (moves.length === 0 || isReviewing || isReviewingRef.current) return;
+    runMatchRatingPass(initialFen, moves, activeMatchId, activeVariant, initialChess960Rights);
+  }, [moves, isReviewing, runMatchRatingPass, initialFen, activeMatchId, activeVariant, initialChess960Rights]);
 
   const handleRequestHint = useCallback(() => {
     const bestUci = engineAnalysis?.bestMoveUci ?? engineAnalysis?.lines[0]?.pvUci[0];
@@ -1003,6 +1166,7 @@ export default function App() {
 
   const handleTakeback = useCallback(() => {
     if (moves.length === 0) return;
+    matchSessionIdRef.current += 1;
     cancelOngoingReview();
     opponentRef.current?.cancel();
     setIsBotThinking(false);
@@ -1032,6 +1196,7 @@ export default function App() {
       const parsed = parsePgnOrFen(text);
       if (!parsed.ok) return parsed;
 
+      matchSessionIdRef.current += 1;
       cancelOngoingReview();
       opponentRef.current?.terminate();
       analyzerRef.current?.stop();
@@ -1043,12 +1208,22 @@ export default function App() {
           : parsed.initialFen !== INITIAL_FEN
             ? 'custom'
             : 'standard';
+      const imported960Rights =
+        importedVariant === 'chess960' ? parsed.initialChess960Rights ?? null : null;
 
       setActiveMode('analysis');
       setActiveVariant(importedVariant);
       setActiveChess960Id(null);
+      setInitialChess960Rights(imported960Rights);
       setInitialFen(parsed.initialFen);
-      setPositionLabel(label ?? (parsed.initialFen !== INITIAL_FEN ? 'Custom FEN Position' : 'Imported Match'));
+      setPositionLabel(
+        label ??
+          (importedVariant === 'chess960'
+            ? 'Chess960 Match'
+            : parsed.initialFen !== INITIAL_FEN
+              ? 'Custom FEN Position'
+              : 'Imported Match')
+      );
       setActiveMatchId(null);
       setMoves(parsed.moves);
       setViewPly(parsed.moves.length);
@@ -1060,16 +1235,20 @@ export default function App() {
       setBlackClock(null);
       setHintArrow(null);
       setShowBestArrow(true);
+      setEngineAnalysis(null);
       displayedEvalRef.current = { fen: null, score: null, depth: 0 };
       setAppState('playing');
       setRightTab(autoRate ? 'rating' : 'moves');
 
       if (autoRate && parsed.moves.length > 0) {
-        const isStd = importedVariant === 'standard';
-        delayedReviewTimerRef.current = window.setTimeout(() => {
-          delayedReviewTimerRef.current = null;
-          runMatchRatingPass(parsed.initialFen, parsed.moves, null, isStd);
-        }, 50);
+        // Start Review synchronously in the same render batch so realtime analysis never races ahead
+        void runMatchRatingPass(
+          parsed.initialFen,
+          parsed.moves,
+          null,
+          importedVariant,
+          imported960Rights
+        );
       }
 
       return { ok: true };
@@ -1212,7 +1391,7 @@ export default function App() {
       };
     }
     return stabilizeEvaluation({
-      fen: viewedFen,
+      fen: viewedEngineFen,
       incomingScore: matchingEngineLine?.score ?? null,
       incomingDepth: matchingEngineLine ? engineAnalysis?.depth ?? matchingEngineLine.depth : 0,
       isSearching: Boolean(engineAnalysis && engineAnalysis.fen === viewedFen && engineAnalysis.isSearching),
@@ -1220,7 +1399,7 @@ export default function App() {
       cache: evalCacheRef.current,
       displayed: displayedEvalRef.current,
     });
-  }, [appState, viewedFen, matchingEngineLine, engineAnalysis, viewedLastMove?.evalAfter]);
+  }, [appState, viewedFen, viewedEngineFen, matchingEngineLine, engineAnalysis, viewedLastMove?.evalAfter]);
 
   useEffect(() => {
     displayedEvalRef.current = stabilizedEval.nextDisplayed;
@@ -1293,10 +1472,12 @@ export default function App() {
 
   const returnToHub = useCallback(
     (targetSection: HubSection) => {
+      matchSessionIdRef.current += 1;
       cancelOngoingReview();
       opponentRef.current?.terminate();
       analyzerRef.current?.terminate();
       clockRef.current = null;
+      setEngineAnalysis(null);
       setHubSection(targetSection);
       setAppState('title');
     },
@@ -1547,7 +1728,7 @@ export default function App() {
             evalDepth={stabilizedEval.depth}
             evalStabilizing={stabilizedEval.isStabilizing}
             allowCastling={allowCastling}
-            chess960Rights={null}
+            chess960Rights={viewedChess960Rights}
             onMove={applyMove}
           />
 
@@ -1614,6 +1795,7 @@ export default function App() {
           moves={moves}
           viewPly={viewPly}
           currentFen={viewedFen}
+          displayFen={viewedEngineFen}
           opening={opening}
           positionLabel={positionLabel}
           whiteName={whiteName}
@@ -1627,8 +1809,10 @@ export default function App() {
           showBestArrow={showBestArrow}
           onToggleBestArrow={handleToggleBestArrow}
           isGameOver={termination.isOver}
+          resultString={termination.resultString}
           isReviewing={isReviewing}
           reviewProgress={reviewProgress}
+          reviewError={reviewError}
           onSelectPly={handleSelectPly}
           onFlipBoard={handleFlipBoard}
           onRequestHint={handleRequestHint}
@@ -1637,6 +1821,7 @@ export default function App() {
           onResign={handleResign}
           onNewMatch={handleOpenNewMatchModal}
           onRunGameReview={handleRunGameReview}
+          onCancelGameReview={cancelOngoingReview}
           onPlayEngineMove={handlePlayEngineMove}
           onImportPgnOrFen={handleImportPlain}
           onImportAndRatePgn={handleImportAndRate}
@@ -1672,6 +1857,7 @@ export default function App() {
           finalFen={latestFen}
           onAnalysis={() => {
             setGameOverDismissed(true);
+            opponentRef.current?.terminate();
             clockRef.current = null;
             setWhiteClock(null);
             setBlackClock(null);
@@ -1680,7 +1866,7 @@ export default function App() {
             setShowBestArrow(true);
             setRightTab('rating');
             if (moves.length > 0) {
-              handleRunGameReview();
+              void runMatchRatingPass(initialFen, moves, activeMatchId, activeVariant, initialChess960Rights);
             }
           }}
           onNewMatch={() => {

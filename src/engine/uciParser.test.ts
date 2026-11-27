@@ -120,3 +120,13 @@ test('parseUciInfoLine ignores noisy aspiration lowerbound and upperbound lines'
   assert.equal(parseUciInfoLine(lower, 'w'), null);
   assert.equal(parseUciInfoLine(upper, 'b'), null);
 });
+
+test('evalToWhiteWinProbability and calculateAverageAccuracy guard NaN, Infinity, and out-of-range values', () => {
+  assert.equal(evalToWhiteWinProbability({ type: 'cp', value: Number.NaN }), 50);
+  assert.equal(evalToWhiteWinProbability({ type: 'cp', value: Number.POSITIVE_INFINITY }), 100);
+  assert.equal(evalToWhiteWinProbability({ type: 'cp', value: Number.NEGATIVE_INFINITY }), 0);
+
+  assert.equal(calculateAverageAccuracy([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]), null);
+  assert.equal(calculateAverageAccuracy([Number.NaN, 150, -20, 80]), 60); // clamped (100 + 0 + 80) / 3 = 60
+});
+
