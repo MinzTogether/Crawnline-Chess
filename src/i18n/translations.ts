@@ -208,6 +208,7 @@ export const EN_TRANSLATIONS = {
 
   // Gameplay Settings
   toggleEvalBar: 'Show Evaluation Bar',
+  toggleMaterialDiff: 'Show Material Difference',
   toggleCoords: 'Board Coordinates',
   toggleLegalMoves: 'Legal Move Dots',
   toggleSounds: 'Piece Sound Effects',
@@ -477,6 +478,7 @@ export const VI_TRANSLATIONS: TranslationDict = {
   animResetPreset: 'Đặt lại mức chọn',
 
   toggleEvalBar: 'Hiện thanh đo lợi thế',
+  toggleMaterialDiff: 'Hiện chênh lệch điểm quân',
   toggleCoords: 'Tọa độ bàn cờ',
   toggleLegalMoves: 'Chấm gợi ý nước hợp lệ',
   toggleSounds: 'Âm thanh quân cờ',
@@ -736,6 +738,7 @@ export const TW_TRANSLATIONS: TranslationDict = {
   animResetPreset: '重設為預設值',
 
   toggleEvalBar: '顯示局勢評估條',
+  toggleMaterialDiff: '顯示子力差額',
   toggleCoords: '棋盤座標',
   toggleLegalMoves: '合法著法圓點',
   toggleSounds: '棋子落子音效',
@@ -995,6 +998,7 @@ export const JP_TRANSLATIONS: TranslationDict = {
   animResetPreset: 'プリセットに戻す',
 
   toggleEvalBar: '評価バーを表示',
+  toggleMaterialDiff: '駒得差を表示',
   toggleCoords: '盤面の座標を表示',
   toggleLegalMoves: '合法手ドットを表示',
   toggleSounds: '駒の効果音',

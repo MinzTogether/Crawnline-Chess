@@ -4,6 +4,7 @@ import {
   buildPgn,
   evaluateGameTermination,
   formatClock,
+  formatMaterialDifference,
   formatPvSanWithNumbers,
   getMaterialSummary,
   parsePgnOrFen,
@@ -25,6 +26,15 @@ test('getMaterialSummary computes captured pieces and advantage', () => {
   assert.deepEqual(summary.capturedByWhite, ['q', 'p']);
   assert.deepEqual(summary.capturedByBlack, []);
   assert.equal(summary.advantage, 10);
+});
+
+test('formatMaterialDifference returns +N only when enabled and positive', () => {
+  assert.equal(formatMaterialDifference(2), '+2');
+  assert.equal(formatMaterialDifference(5, true), '+5');
+  assert.equal(formatMaterialDifference(2, false), null);
+  assert.equal(formatMaterialDifference(0, true), null);
+  assert.equal(formatMaterialDifference(-3, true), null);
+  assert.equal(formatMaterialDifference(Number.NaN, true), null);
 });
 
 test('detectOpening identifies deepest matching ECO opening', () => {

@@ -1175,6 +1175,7 @@ export default function App() {
             isEngineThinking={activeMode === 'stockfish' && isBotThinking && topColor !== humanColor}
             capturedPieces={topColor === 'w' ? material.capturedByWhite : material.capturedByBlack}
             materialAdvantage={topColor === 'w' ? material.advantage : -material.advantage}
+            showMaterialDifference={preferences.showMaterialDifference}
             clockSeconds={topColor === 'w' ? whiteClock : blackClock}
             accuracy={topColor === 'w' ? whiteAccuracy : blackAccuracy}
           />
@@ -1218,6 +1219,7 @@ export default function App() {
             isEngineThinking={activeMode === 'stockfish' && isBotThinking && bottomColor !== humanColor}
             capturedPieces={bottomColor === 'w' ? material.capturedByWhite : material.capturedByBlack}
             materialAdvantage={bottomColor === 'w' ? material.advantage : -material.advantage}
+            showMaterialDifference={preferences.showMaterialDifference}
             clockSeconds={bottomColor === 'w' ? whiteClock : blackClock}
             accuracy={bottomColor === 'w' ? whiteAccuracy : blackAccuracy}
           />

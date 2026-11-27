@@ -1361,30 +1361,42 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {[
               {
+                id: 'eval-bar',
                 label: t('toggleEvalBar'),
                 checked: preferences.showEvalBar,
                 toggle: () => onUpdatePreferences({ showEvalBar: !preferences.showEvalBar }),
               },
               {
+                id: 'material-diff',
+                label: t('toggleMaterialDiff'),
+                checked: preferences.showMaterialDifference,
+                toggle: () =>
+                  onUpdatePreferences({ showMaterialDifference: !preferences.showMaterialDifference }),
+              },
+              {
+                id: 'coords',
                 label: t('toggleCoords'),
                 checked: preferences.showCoordinates,
                 toggle: () => onUpdatePreferences({ showCoordinates: !preferences.showCoordinates }),
               },
               {
+                id: 'legal-moves',
                 label: t('toggleLegalMoves'),
                 checked: preferences.showLegalMoves,
                 toggle: () => onUpdatePreferences({ showLegalMoves: !preferences.showLegalMoves }),
               },
               {
+                id: 'sounds',
                 label: t('toggleSounds'),
                 checked: !preferences.muted,
                 toggle: () => onUpdatePreferences({ muted: !preferences.muted }),
               },
             ].map((opt) => (
               <button
-                key={opt.label}
+                key={opt.id}
                 type="button"
                 role="switch"
+                data-testid={`toggle-${opt.id}`}
                 aria-checked={opt.checked}
                 onClick={opt.toggle}
                 className="flex items-center justify-between px-4 py-3.5 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors cursor-pointer anim-interactive"

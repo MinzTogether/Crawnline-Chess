@@ -73,6 +73,18 @@ export function getMaterialSummary(fen: string): MaterialSummary {
 }
 
 /**
+ * Formats a player's numerical material advantage (e.g., '+2') when enabled and positive.
+ */
+export function formatMaterialDifference(
+  materialAdvantage: number,
+  showMaterialDifference = true,
+): string | null {
+  if (!showMaterialDifference) return null;
+  if (!Number.isFinite(materialAdvantage) || materialAdvantage <= 0) return null;
+  return `+${Math.round(materialAdvantage)}`;
+}
+
+/**
  * Converts a Stockfish UCI principal variation (e.g. ['e2e4', 'e7e5', 'g1f3'])
  * starting from `fen` into clean SAN tokens (e.g. ['e4', 'e5', 'Nf3']).
  */

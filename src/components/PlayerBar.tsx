@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Color, PieceSymbol } from 'chess.js';
-import { formatClock } from '../game/chessLogic';
+import { formatClock, formatMaterialDifference } from '../game/chessLogic';
 import { PIECE_UNICODE } from './ChessPieces';
 
 interface PlayerBarProps {
@@ -12,6 +12,7 @@ interface PlayerBarProps {
   isEngineThinking?: boolean;
   capturedPieces: PieceSymbol[];
   materialAdvantage: number;
+  showMaterialDifference?: boolean;
   clockSeconds: number | null;
   accuracy: number | null;
 }
@@ -25,11 +26,13 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
   isEngineThinking = false,
   capturedPieces,
   materialAdvantage,
+  showMaterialDifference = true,
   clockSeconds,
   accuracy,
 }) => {
   const isLowTime = clockSeconds !== null && clockSeconds > 0 && clockSeconds <= 20;
   const isFlagged = clockSeconds !== null && clockSeconds <= 0;
+  const materialDiffLabel = formatMaterialDifference(materialAdvantage, showMaterialDifference);
 
   return (
     <div className="arena-player-bar flex items-center justify-between gap-3 py-2 px-1">
@@ -77,14 +80,18 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
                   <span key={`${p}-${idx}`}>{PIECE_UNICODE[p]}</span>
                 ))}
               </span>
-            ) : (
+            ) : !materialDiffLabel ? (
               <span className="arena-player-idle-text text-[11px] text-[var(--app-text-subtle)]">
                 {isActiveTurn ? 'To move' : 'Waiting'}
               </span>
-            )}
-            {materialAdvantage > 0 && (
-              <span className="font-mono tabular-nums text-[11px] font-semibold text-[var(--app-text)] ml-1">
-                +{materialAdvantage}
+            ) : null}
+            {materialDiffLabel && (
+              <span
+                data-testid={`player-material-diff-${color}`}
+                aria-label={`Material advantage ${materialDiffLabel}`}
+                className="font-mono tabular-nums text-[11px] font-bold leading-none text-[var(--app-text)] opacity-90 ml-0.5"
+              >
+                {materialDiffLabel}
               </span>
             )}
           </div>

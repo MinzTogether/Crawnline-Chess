@@ -582,6 +582,7 @@ export interface AppPreferences {
   showCoordinates: boolean;
   showLegalMoves: boolean;
   showEvalBar: boolean;
+  showMaterialDifference: boolean;
   muted: boolean;
   analysisDepth: number;
   multiPv: number;
@@ -606,6 +607,7 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   showCoordinates: true,
   showLegalMoves: true,
   showEvalBar: true,
+  showMaterialDifference: true,
   muted: false,
   analysisDepth: 16,
   multiPv: 3,
