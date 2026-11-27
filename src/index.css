@@ -761,30 +761,19 @@ body {
 
 :root {
   --anim-mult: 1;
+  --anim-piece-ms: 185ms;
+  --anim-eval-ms: 440ms;
   --anim-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --anim-spring: cubic-bezier(0.22, 1.25, 0.36, 1);
+  --anim-piece-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --anim-spring: cubic-bezier(0.22, 1.32, 0.36, 1);
+  --anim-piece-lift-scale: 1.09;
+  --anim-piece-lift-shadow: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.34));
 }
 
 :root[data-animation-level="off"] {
   --anim-mult: 0;
-}
-
-:root[data-animation-level="subtle"] {
-  --anim-mult: 0.65;
-  --anim-ease: cubic-bezier(0.2, 0.9, 0.3, 1);
-  --anim-spring: cubic-bezier(0.2, 0.9, 0.3, 1);
-}
-
-:root[data-animation-level="smooth"] {
-  --anim-mult: 1;
-  --anim-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --anim-spring: cubic-bezier(0.22, 1.18, 0.36, 1);
-}
-
-:root[data-animation-level="expressive"] {
-  --anim-mult: 1.32;
-  --anim-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --anim-spring: cubic-bezier(0.2, 1.36, 0.34, 1);
+  --anim-piece-ms: 0ms;
+  --anim-eval-ms: 0ms;
 }
 
 @keyframes view-enter {
@@ -842,10 +831,17 @@ body {
 
 @keyframes piece-slide {
   0% {
-    transform: translate(var(--slide-x, 0%), var(--slide-y, 0%)) scale(1.04);
+    transform: translate(var(--slide-x, 0%), var(--slide-y, 0%)) scale(1);
+    filter: none;
+  }
+  42% {
+    transform: translate(calc(var(--slide-x, 0%) * 0.48), calc(var(--slide-y, 0%) * 0.48))
+      scale(var(--anim-piece-lift-scale, 1.09));
+    filter: var(--anim-piece-lift-shadow, none);
   }
   100% {
     transform: translate(0%, 0%) scale(1);
+    filter: none;
   }
 }
 
@@ -886,12 +882,12 @@ body {
 
 @keyframes check-pulse {
   0%, 100% {
-    opacity: 0.88;
+    opacity: 0.86;
     transform: scale(1);
   }
   50% {
     opacity: 1;
-    transform: scale(1.04);
+    transform: scale(1.045);
   }
 }
 
@@ -901,7 +897,7 @@ body {
 
 .anim-card-stagger {
   animation: card-enter calc(230ms * var(--anim-mult)) var(--anim-ease) both;
-  animation-delay: calc(var(--stagger, 0) * 32ms * var(--anim-mult));
+  animation-delay: calc(var(--stagger, 0) * 30ms * var(--anim-mult));
 }
 
 .anim-interactive {
@@ -933,7 +929,7 @@ body {
 
 .anim-piece-slide {
   will-change: transform;
-  animation: piece-slide calc(185ms * var(--anim-mult)) var(--anim-ease) both;
+  animation: piece-slide var(--anim-piece-ms, 185ms) var(--anim-piece-ease) both;
 }
 
 .animate-piece-pop {
@@ -954,14 +950,14 @@ body {
 
 .anim-eval-fill {
   transition-property: transform;
-  transition-duration: calc(460ms * var(--anim-mult));
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  transition-duration: var(--anim-eval-ms, 440ms);
+  transition-timing-function: var(--anim-ease);
 }
 
 .anim-eval-seam {
   transition-property: top, opacity;
-  transition-duration: calc(460ms * var(--anim-mult));
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  transition-duration: var(--anim-eval-ms, 440ms);
+  transition-timing-function: var(--anim-ease);
 }
 
 /* Independent channel toggles & off preset */
@@ -982,10 +978,15 @@ body {
 :root[data-ui-transitions="off"] .anim-tooltip-enter,
 :root[data-piece-motion="off"] .anim-piece-slide,
 :root[data-piece-motion="off"] .animate-piece-pop,
-:root[data-piece-motion="off"] .anim-badge-pop,
-:root[data-piece-motion="off"] .anim-dot-pop,
-:root[data-piece-motion="off"] .anim-check-pulse {
+:root[data-badge-motion="off"] .anim-badge-pop,
+:root[data-highlight-motion="off"] .anim-dot-pop,
+:root[data-highlight-motion="off"] .anim-check-pulse {
   animation: none !important;
+}
+
+:root[data-eval-motion="off"] .anim-eval-fill,
+:root[data-eval-motion="off"] .anim-eval-seam {
+  transition-duration: 0ms !important;
 }
 
 :root[data-animation-level="off"] .anim-interactive:hover,
@@ -998,6 +999,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   :root {
     --anim-mult: 0;
+    --anim-piece-ms: 0ms;
+    --anim-eval-ms: 0ms;
   }
   .anim-view-enter,
   .anim-card-stagger,
@@ -1011,9 +1014,252 @@ body {
   .anim-check-pulse {
     animation: none !important;
   }
+  .anim-eval-fill,
+  .anim-eval-seam {
+    transition-duration: 0ms !important;
+  }
   .anim-interactive:hover,
   .anim-interactive:active {
     transform: none;
+  }
+}
+
+/* ============================================================================
+   TABLET & LANDSCAPE RESPONSIVE LAYOUT ARCHITECTURE
+   ============================================================================ */
+
+/* Tablet Portrait (768px - 1023px): spacious board + clean centered panel dock */
+@media (min-width: 768px) and (max-width: 1023px) and (orientation: portrait) {
+  .hub-rail {
+    width: 196px !important;
+    padding: 0.875rem !important;
+  }
+
+  .arena-board-col {
+    width: min(100%, 620px, calc(100dvh - 250px)) !important;
+    max-width: 620px !important;
+  }
+
+  .arena-dock {
+    width: 100% !important;
+    max-width: 620px !important;
+  }
+}
+
+/* Tablet Landscape & Compact Desktop (>= 840px landscape with comfortable height >= 561px) */
+@media (min-width: 840px) and (min-height: 561px) and (orientation: landscape) {
+  .arena-main {
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 1.25rem !important;
+  }
+
+  .arena-mobile-move-bar {
+    display: none !important;
+  }
+
+  .arena-board-col {
+    width: min(56vw, 660px, calc(100dvh - 122px)) !important;
+    flex-shrink: 0;
+  }
+
+  .arena-dock {
+    width: 376px !important;
+    height: calc(100dvh - 68px) !important;
+    max-height: 800px !important;
+    flex-shrink: 0;
+  }
+
+  .arena-move-list {
+    max-height: none !important;
+  }
+}
+
+@media (min-width: 1120px) and (min-height: 561px) and (orientation: landscape) {
+  .arena-dock {
+    width: 400px !important;
+  }
+}
+
+@media (min-width: 1280px) and (min-height: 561px) and (orientation: landscape) {
+  .arena-dock {
+    width: 430px !important;
+  }
+}
+
+/* Phone & Compact Landscape (orientation: landscape & max-height: 560px) */
+@media (orientation: landscape) and (max-height: 560px) {
+  /* Main Hub switches from vertical bottom nav to sleek left rail so 100% height is usable */
+  .hub-shell {
+    flex-direction: row !important;
+  }
+
+  .hub-mobile-topbar,
+  .hub-mobile-bottomnav {
+    display: none !important;
+  }
+
+  .hub-rail {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 164px !important;
+    height: 100dvh !important;
+    position: sticky;
+    top: 0;
+    padding: 0.625rem !important;
+    overflow-y: auto;
+  }
+
+  .hub-rail-nav-btn {
+    padding: 0.5rem 0.625rem !important;
+    font-size: 0.75rem !important;
+  }
+
+  .hub-main {
+    padding-bottom: 0.75rem !important;
+  }
+
+  .hub-content-pad {
+    padding-top: 0.875rem !important;
+    padding-bottom: 1rem !important;
+    gap: 1rem !important;
+  }
+
+  /* Chess Arena switches to single-viewport side-by-side split without vertical clipping */
+  .arena-shell {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+
+  .arena-topbar {
+    padding: 0.25rem 0.75rem !important;
+    min-height: 36px;
+  }
+
+  .arena-topbar-btn {
+    height: 1.75rem !important;
+    min-width: 1.75rem !important;
+  }
+
+  .arena-main {
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0.2rem 0.75rem 0.3rem !important;
+    gap: 0.75rem !important;
+    flex: 1 1 0%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .arena-mobile-move-bar {
+    display: none !important;
+  }
+
+  .arena-board-col {
+    width: min(50vw, calc(100dvh - 64px)) !important;
+    max-width: 480px !important;
+    flex-shrink: 0;
+  }
+
+  .arena-player-bar {
+    padding: 2px 2px !important;
+    gap: 0.4rem !important;
+  }
+
+  .arena-player-avatar {
+    width: 1.5rem !important;
+    height: 1.5rem !important;
+    font-size: 0.7rem !important;
+  }
+
+  .arena-player-name {
+    font-size: 0.75rem !important;
+    line-height: 1.15 !important;
+  }
+
+  .arena-player-subrow {
+    min-height: 0 !important;
+  }
+
+  .arena-player-idle-text {
+    display: none !important;
+  }
+
+  .arena-player-clock {
+    padding: 2px 8px !important;
+    font-size: 0.8125rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .arena-dock {
+    flex: 1 1 0% !important;
+    width: auto !important;
+    min-width: 248px;
+    max-width: 440px;
+    height: calc(100dvh - 44px) !important;
+    max-height: calc(100dvh - 44px) !important;
+  }
+
+  .arena-dock-tab {
+    padding-top: 0.45rem !important;
+    padding-bottom: 0.45rem !important;
+    font-size: 11px !important;
+  }
+
+  .arena-eval-graph {
+    display: none !important;
+  }
+
+  .arena-move-list {
+    min-height: 60px !important;
+    max-height: none !important;
+  }
+
+  .arena-dock-vcr {
+    padding: 0.3rem 0.625rem !important;
+  }
+
+  .arena-dock-vcr button {
+    padding-top: 0.35rem !important;
+    padding-bottom: 0.35rem !important;
+  }
+
+  .arena-dock-footer {
+    padding: 0.45rem 0.625rem !important;
+    gap: 0.35rem !important;
+  }
+
+  .arena-dock-action-btn {
+    padding-top: 0.3rem !important;
+    padding-bottom: 0.3rem !important;
+    flex-direction: row !important;
+    gap: 0.25rem !important;
+    font-size: 10px !important;
+  }
+
+  .arena-dock-cta {
+    padding-top: 0.45rem !important;
+    padding-bottom: 0.45rem !important;
+  }
+}
+
+/* Narrow phone landscape (< 720px wide, e.g. 667x375): ultra-slim icon rail in MainHub */
+@media (orientation: landscape) and (max-height: 560px) and (max-width: 719px) {
+  .hub-rail {
+    width: 68px !important;
+    align-items: center;
+  }
+
+  .hub-rail-text {
+    display: none !important;
+  }
+
+  .hub-rail-nav-btn {
+    justify-content: center;
+    padding: 0.625rem !important;
   }
 }
 

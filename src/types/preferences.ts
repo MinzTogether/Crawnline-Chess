@@ -1,7 +1,8 @@
 import type { BoardThemeId } from './chess';
 import type { AppLanguage } from '../i18n/translations';
+import type { AnimationEasingId, AnimationLevelId } from '../utils/animationConfig';
 
-export type AnimationLevelId = 'off' | 'subtle' | 'smooth' | 'expressive';
+export type { AnimationEasingId, AnimationLevelId };
 
 export type AppThemeId =
   | 'dark-slate'
@@ -569,7 +570,14 @@ export interface AppPreferences {
   pieceStyle: PieceStyleId;
   language: AppLanguage;
   animationLevel: AnimationLevelId;
+  pieceSpeedMs: number;
+  uiSpeedMultiplier: number;
+  animationEasing: AnimationEasingId;
+  pieceLiftEffect: boolean;
   pieceMoveAnimation: boolean;
+  badgePopAnimation: boolean;
+  boardHighlightsAnimation: boolean;
+  evalBarAnimation: boolean;
   uiTransitions: boolean;
   showCoordinates: boolean;
   showLegalMoves: boolean;
@@ -586,7 +594,14 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   pieceStyle: 'classic',
   language: 'en',
   animationLevel: 'smooth',
+  pieceSpeedMs: 185,
+  uiSpeedMultiplier: 1.0,
+  animationEasing: 'smooth',
+  pieceLiftEffect: true,
   pieceMoveAnimation: true,
+  badgePopAnimation: true,
+  boardHighlightsAnimation: true,
+  evalBarAnimation: true,
   uiTransitions: true,
   showCoordinates: true,
   showLegalMoves: true,

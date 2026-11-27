@@ -48,7 +48,7 @@ export const MobileMoveBar: React.FC<MobileMoveBarProps> = ({
     <div
       data-testid="mobile-move-bar"
       aria-label="Mobile move history strip"
-      className="lg:hidden mb-1.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center h-11 overflow-hidden shadow-xs"
+      className="arena-mobile-move-bar lg:hidden mb-1.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] flex items-center h-11 overflow-hidden shadow-xs"
     >
       {/* Scrollable Horizontal Move Ribbon */}
       <div

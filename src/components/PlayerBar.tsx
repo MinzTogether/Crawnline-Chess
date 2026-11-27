@@ -32,17 +32,17 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
   const isFlagged = clockSeconds !== null && clockSeconds <= 0;
 
   return (
-    <div className="flex items-center justify-between gap-3 py-2 px-1">
-      <div className="flex items-center gap-3 min-w-0">
+    <div className="arena-player-bar flex items-center justify-between gap-3 py-2 px-1">
+      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
         {avatarImage ? (
           <img
             src={avatarImage}
             alt={name}
-            className="w-9 h-9 rounded-md shrink-0 object-cover border border-[var(--app-border-strong)]"
+            className="arena-player-avatar w-9 h-9 rounded-md shrink-0 object-cover border border-[var(--app-border-strong)]"
           />
         ) : (
           <div
-            className={`w-9 h-9 rounded-md shrink-0 flex items-center justify-center border font-bold text-sm ${
+            className={`arena-player-avatar w-9 h-9 rounded-md shrink-0 flex items-center justify-center border font-bold text-sm ${
               color === 'w'
                 ? 'bg-[#ECEAE4] text-[#181817] border-black/15'
                 : 'bg-[#2A2926] text-[#F1EFEA] border-white/15'
@@ -54,7 +54,7 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
         )}
 
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="arena-player-name flex items-center gap-2 text-sm">
             <span className="font-bold text-[var(--app-text)] truncate">{name}</span>
             {subtitle && <span className="text-xs text-[var(--app-text-muted)] whitespace-nowrap">{subtitle}</span>}
             {accuracy !== null && (
@@ -67,7 +67,7 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 min-h-[18px] text-xs text-[var(--app-text-muted)]">
+          <div className="arena-player-subrow flex items-center gap-1.5 min-h-[18px] text-xs text-[var(--app-text-muted)]">
             {capturedPieces.length > 0 ? (
               <span
                 className="tracking-[-0.12em] text-sm leading-none text-[var(--app-text)] opacity-85"
@@ -78,7 +78,7 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
                 ))}
               </span>
             ) : (
-              <span className="text-[11px] text-[var(--app-text-subtle)]">
+              <span className="arena-player-idle-text text-[11px] text-[var(--app-text-subtle)]">
                 {isActiveTurn ? 'To move' : 'Waiting'}
               </span>
             )}
@@ -93,7 +93,7 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
 
       {clockSeconds !== null && (
         <div
-          className={`px-3.5 py-1.5 rounded-md font-mono font-bold text-lg tabular-nums tracking-tight shrink-0 transition-colors border ${
+          className={`arena-player-clock px-3.5 py-1.5 rounded-md font-mono font-bold text-lg tabular-nums tracking-tight shrink-0 transition-colors border ${
             isFlagged
               ? 'bg-[#C94A4A] text-white border-[#E06A6A]'
               : isActiveTurn

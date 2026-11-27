@@ -209,13 +209,13 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     <aside
       id="right-panel-dock"
       aria-label="Chess analysis and move history panel"
-      className="w-full lg:w-[400px] xl:w-[430px] shrink-0 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl flex flex-col overflow-hidden lg:h-[calc(100vh-4.2rem)] lg:max-h-[820px]"
+      className="arena-dock w-full lg:w-[400px] xl:w-[430px] shrink-0 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl flex flex-col overflow-hidden lg:h-[calc(100vh-4.2rem)] lg:max-h-[820px]"
     >
       {/* 4-Tab Bar: Moves, Rating, Stockfish, Library */}
       <div
         role="tablist"
         aria-label="Workspace tabs"
-        className="grid grid-cols-4 bg-[var(--app-surface-2)] border-b border-[var(--app-border)]"
+        className="grid grid-cols-4 bg-[var(--app-surface-2)] border-b border-[var(--app-border)] shrink-0"
       >
         {(
           [
@@ -234,14 +234,14 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               role="tab"
               aria-selected={active}
               onClick={() => onTabChange(tab.id)}
-              className={`flex items-center justify-center gap-1.5 py-3 px-2 text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer border-b-2 ${
+              className={`arena-dock-tab flex items-center justify-center gap-1 py-3 px-1 text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer border-b-2 ${
                 active
                   ? 'border-[var(--app-accent)] text-[var(--app-text)] bg-[var(--app-surface)]'
                   : 'border-transparent text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
               <Icon className="w-3.5 h-3.5 shrink-0" />
-              <span>{tab.label}</span>
+              <span className="truncate">{tab.label}</span>
             </button>
           );
         })}
@@ -292,7 +292,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             </div>
           </div>
 
-          <div className="px-3.5 pt-3">
+          <div className="arena-eval-graph px-3.5 pt-3 shrink-0">
             <EvalGraph moves={moves} viewPly={viewPly} onSelectPly={onSelectPly} liveEval={topScore} />
           </div>
 
@@ -339,7 +339,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
           <div
             ref={moveListContainerRef}
-            className="flex-1 min-h-[140px] max-h-[260px] lg:max-h-none overflow-y-auto px-3.5 py-2"
+            className="arena-move-list flex-1 min-h-[140px] max-h-[260px] lg:max-h-none overflow-y-auto px-3.5 py-2"
             data-testid="move-history"
           >
             {moveRows.length === 0 ? (
@@ -452,7 +452,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </div>
 
           {/* VCR Controls */}
-          <div className="px-3.5 py-2 border-t border-[var(--app-border)] bg-[var(--app-surface-2)] grid grid-cols-5 gap-1">
+          <div className="arena-dock-vcr px-3.5 py-2 border-t border-[var(--app-border)] bg-[var(--app-surface-2)] grid grid-cols-5 gap-1 shrink-0">
             {[
               { label: 'First move', disabled: viewPly === 0, onClick: () => onSelectPly(0), icon: ChevronFirst },
               {
@@ -492,43 +492,43 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </div>
 
           {/* Action Footer */}
-          <div className="p-3.5 border-t border-[var(--app-border)] bg-[var(--app-surface-2)] flex flex-col gap-2">
+          <div className="arena-dock-footer p-3.5 border-t border-[var(--app-border)] bg-[var(--app-surface-2)] flex flex-col gap-2 shrink-0">
             <div className="grid grid-cols-4 gap-1.5">
               <button
                 type="button"
                 onClick={onRequestHint}
                 disabled={isGameOver}
-                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
+                className="arena-dock-action-btn flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
               >
-                <Lightbulb className="w-3.5 h-3.5 text-[#E6A832]" />
-                <span>{t('actionHint')}</span>
+                <Lightbulb className="w-3.5 h-3.5 text-[#E6A832] shrink-0" />
+                <span className="truncate">{t('actionHint')}</span>
               </button>
               <button
                 type="button"
                 onClick={onTakeback}
                 disabled={moves.length === 0}
-                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
+                className="arena-dock-action-btn flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
               >
-                <RotateCcw className="w-3.5 h-3.5 text-[var(--app-text-muted)]" />
-                <span>{t('actionTakeback')}</span>
+                <RotateCcw className="w-3.5 h-3.5 text-[var(--app-text-muted)] shrink-0" />
+                <span className="truncate">{t('actionTakeback')}</span>
               </button>
               <button
                 type="button"
                 onClick={onOfferDraw}
                 disabled={isGameOver || mode === 'analysis'}
-                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
+                className="arena-dock-action-btn flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
               >
-                <Handshake className="w-3.5 h-3.5 text-[var(--app-text-muted)]" />
-                <span>{t('actionDraw')}</span>
+                <Handshake className="w-3.5 h-3.5 text-[var(--app-text-muted)] shrink-0" />
+                <span className="truncate">{t('actionDraw')}</span>
               </button>
               <button
                 type="button"
                 onClick={onResign}
                 disabled={isGameOver || mode === 'analysis'}
-                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[#C94A4A]/20 border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
+                className="arena-dock-action-btn flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[#C94A4A]/20 border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
               >
-                <Flag className="w-3.5 h-3.5 text-[#D96666]" />
-                <span>{t('actionResign')}</span>
+                <Flag className="w-3.5 h-3.5 text-[#D96666] shrink-0" />
+                <span className="truncate">{t('actionResign')}</span>
               </button>
             </div>
 
@@ -540,15 +540,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   if (moves.length > 0 && !isReviewing) onRunGameReview();
                 }}
                 disabled={moves.length === 0 || isReviewing}
-                className="py-2.5 px-3 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-xs font-bold text-[var(--app-text)] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap anim-interactive"
+                className="arena-dock-cta py-2.5 px-3 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-xs font-bold text-[var(--app-text)] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap anim-interactive"
               >
-                <Sparkles className="w-3.5 h-3.5 text-[var(--app-accent)]" />
-                <span>{isReviewing ? `${reviewProgress}%` : t('rateMatch')}</span>
+                <Sparkles className="w-3.5 h-3.5 text-[var(--app-accent)] shrink-0" />
+                <span className="truncate">{isReviewing ? `${reviewProgress}%` : t('rateMatch')}</span>
               </button>
               <button
                 type="button"
                 onClick={onNewMatch}
-                className="py-2.5 px-3 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-xs font-extrabold text-[var(--app-accent-fg)] transition-colors cursor-pointer whitespace-nowrap anim-interactive"
+                className="arena-dock-cta py-2.5 px-3 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-xs font-extrabold text-[var(--app-accent-fg)] transition-colors cursor-pointer whitespace-nowrap anim-interactive"
               >
                 {t('actionNewMatch')}
               </button>

@@ -200,18 +200,18 @@ export const MainHub: React.FC<MainHubProps> = ({
   };
 
   return (
-    <div className="min-h-screen w-full bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col md:flex-row">
-      {/* Left Vertical Chess.com-style Sidebar Rail (Desktop) — Strictly Home, Settings, Profile */}
+    <div className="hub-shell min-h-screen w-full bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col md:flex-row">
+      {/* Left Vertical Chess.com-style Sidebar Rail (Tablet/Desktop/Landscape) — Strictly Home, Settings, Profile */}
       <aside
         aria-label="Main navigation"
-        className="hidden md:flex md:flex-col md:w-[228px] lg:w-[244px] shrink-0 bg-[var(--app-rail)] border-r border-[var(--app-border)] p-4 justify-between sticky top-0 h-screen"
+        className="hub-rail hidden md:flex md:flex-col md:w-[208px] lg:w-[244px] shrink-0 bg-[var(--app-rail)] border-r border-[var(--app-border)] p-4 justify-between sticky top-0 h-screen"
       >
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-5">
           {/* Brand Lockup with Customizable App Icon */}
-          <div className="flex items-center gap-3 px-2 pt-1">
-            <AppLogoIcon iconId={preferences.appIcon} className="w-10 h-10 shrink-0" />
-            <div className="min-w-0">
-              <div className="text-lg font-extrabold tracking-tight text-[var(--app-text)] leading-none truncate">
+          <div className="flex items-center gap-3 px-1.5 pt-1">
+            <AppLogoIcon iconId={preferences.appIcon} className="w-9 h-9 lg:w-10 lg:h-10 shrink-0" />
+            <div className="hub-rail-text min-w-0">
+              <div className="text-base lg:text-lg font-extrabold tracking-tight text-[var(--app-text)] leading-none truncate">
                 Crownline
               </div>
               <div className="text-[11px] text-[var(--app-text-muted)] mt-1 truncate">
@@ -230,8 +230,10 @@ export const MainHub: React.FC<MainHubProps> = ({
                   key={item.id}
                   type="button"
                   aria-current={active ? 'page' : undefined}
+                  aria-label={item.label}
+                  title={item.label}
                   onClick={() => handleSelectNavSection(item.id)}
-                  className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-bold transition-colors cursor-pointer whitespace-nowrap anim-interactive ${
+                  className={`hub-rail-nav-btn flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-bold transition-colors cursor-pointer whitespace-nowrap anim-interactive ${
                     active
                       ? 'bg-[var(--app-surface)] text-[var(--app-text)] shadow-sm border border-[var(--app-border)]'
                       : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] border border-transparent'
@@ -242,7 +244,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                       active ? 'text-[var(--app-accent)]' : 'text-[var(--app-text-muted)]'
                     }`}
                   />
-                  <span>{item.label}</span>
+                  <span className="hub-rail-text">{item.label}</span>
                 </button>
               );
             })}
@@ -253,7 +255,8 @@ export const MainHub: React.FC<MainHubProps> = ({
         <button
           type="button"
           onClick={() => handleSelectNavSection('profile')}
-          className="w-full overflow-hidden flex items-center gap-3 p-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors text-left cursor-pointer anim-interactive"
+          aria-label={safeDisplayName}
+          className="w-full overflow-hidden flex items-center gap-2.5 p-2 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors text-left cursor-pointer anim-interactive"
         >
           {profile.avatarImage ? (
             <img
@@ -269,15 +272,15 @@ export const MainHub: React.FC<MainHubProps> = ({
               {profileInitials}
             </div>
           )}
-          <div className="min-w-0 flex-1">
+          <div className="hub-rail-text min-w-0 flex-1">
             <div className="text-xs font-bold text-[var(--app-text)] truncate">{safeDisplayName}</div>
             <div className="text-[11px] text-[var(--app-text-muted)] truncate">{safeTitle}</div>
           </div>
         </button>
       </aside>
 
-      {/* Mobile Top Brand Bar */}
-      <div className="md:hidden flex items-center justify-between gap-3 px-4 py-3 bg-[var(--app-rail)] border-b border-[var(--app-border)]">
+      {/* Mobile Portrait Top Brand Bar */}
+      <div className="hub-mobile-topbar md:hidden flex items-center justify-between gap-3 px-4 py-3 bg-[var(--app-rail)] border-b border-[var(--app-border)]">
         <div className="flex items-center gap-2.5 shrink-0">
           <AppLogoIcon iconId={preferences.appIcon} className="w-8 h-8 shrink-0" />
           <span className="text-base font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">
@@ -310,12 +313,12 @@ export const MainHub: React.FC<MainHubProps> = ({
       </div>
 
       {/* Main Content Area */}
-      <main className="flex-1 min-w-0 pb-20 md:pb-8">
+      <main className="hub-main flex-1 min-w-0 pb-20 md:pb-8">
         {/* ================= HOME VIEW (CHESS.COM-STYLE MODE LAUNCHER, NO BOARD) ================= */}
         {section === 'home' && (
           <div
             key="hub-home"
-            className="max-w-[1120px] mx-auto px-4 sm:px-8 py-6 sm:py-9 flex flex-col gap-7 anim-view-enter"
+            className="hub-content-pad max-w-[1120px] mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 flex flex-col gap-6 anim-view-enter"
             data-testid="home-mode-hub"
           >
             {/* Compact Player Header Row (Chess.com Home style) */}
@@ -375,9 +378,9 @@ export const MainHub: React.FC<MainHubProps> = ({
             </div>
 
             {/* Chess.com-style 2-Column Mode Launcher (NO Chessboard): Mode List Left + Setup Panel Right */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div className="hub-home-grid grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-start">
               {/* Left Column: Chess.com-Style Stacked Mode Selection Cards + Recent Matches */}
-              <div className="lg:col-span-7 flex flex-col gap-6">
+              <div className="hub-home-left lg:col-span-7 flex flex-col gap-5 lg:gap-6">
                 <section aria-label={t('selectMode')} className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
@@ -516,7 +519,7 @@ export const MainHub: React.FC<MainHubProps> = ({
               </div>
 
               {/* Right Column: Sticky Chess.com-Style Match Setup & Launch Panel */}
-              <div className="lg:col-span-5 lg:sticky lg:top-6">
+              <div className="hub-home-right lg:col-span-5 lg:sticky lg:top-6">
                 <div
                   key={`setup-${matchSettings.mode}`}
                   className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm anim-view-enter"
@@ -585,11 +588,11 @@ export const MainHub: React.FC<MainHubProps> = ({
                       {/* Stockfish Strength Picker */}
                       {matchSettings.mode === 'stockfish' && (
                         <div>
-                          <div className="flex items-center justify-between mb-2">
+                          <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
                             <span className="text-xs font-semibold text-[var(--app-text-muted)]">
                               {t('stockfishStrength')}
                             </span>
-                            <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)]">
+                            <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)] whitespace-nowrap">
                               {activeLevel.name} · {activeLevel.elo}
                             </span>
                           </div>
@@ -648,9 +651,9 @@ export const MainHub: React.FC<MainHubProps> = ({
 
                       {/* Side Selection */}
                       {matchSettings.mode === 'stockfish' && (
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="text-xs font-semibold text-[var(--app-text-muted)]">{t('playAs')}</span>
-                          <div className="flex items-center gap-1.5">
+                          <div className="grid grid-cols-3 gap-1.5 flex-1 min-w-[190px] max-w-[260px]">
                             {(
                               [
                                 { id: 'w', label: t('white') },
@@ -662,7 +665,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                                 key={s.id}
                                 type="button"
                                 onClick={() => onChangeMatchSettings({ ...matchSettings, playerSide: s.id })}
-                                className={`px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer anim-interactive ${
+                                className={`px-2 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
                                   matchSettings.playerSide === s.id
                                     ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
                                     : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
@@ -708,7 +711,7 @@ export const MainHub: React.FC<MainHubProps> = ({
         {section === 'profile' && (
           <div
             key="hub-profile"
-            className="max-w-[920px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-7 anim-view-enter"
+            className="hub-content-pad max-w-[920px] mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 flex flex-col gap-6 anim-view-enter"
             data-testid="profile-view"
           >
             <div>
@@ -956,10 +959,10 @@ export const MainHub: React.FC<MainHubProps> = ({
         )}
       </main>
 
-      {/* Mobile Bottom Navigation Bar — Strictly Home, Settings, Profile (<= 10% height) */}
+      {/* Mobile Portrait Bottom Navigation Bar — Strictly Home, Settings, Profile (<= 10% height) */}
       <nav
         aria-label="Mobile navigation"
-        className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-[var(--app-rail)] border-t border-[var(--app-border)] grid grid-cols-3 h-14"
+        className="hub-mobile-bottomnav md:hidden fixed bottom-0 inset-x-0 z-30 bg-[var(--app-rail)] border-t border-[var(--app-border)] grid grid-cols-3 h-14"
       >
         {navItems.map((item) => {
           const Icon = item.icon;

@@ -36,6 +36,7 @@ import { calculateAverageAccuracy, classifyMove } from './engine/uciParser';
 import { buildPgn, evaluateGameTermination, getMaterialSummary, parsePgnOrFen } from './game/chessLogic';
 import { detectOpening } from './game/openings';
 import { playChessSound } from './utils/sound';
+import { resolveAnimationTokens } from './utils/animationConfig';
 import { AppLogoIcon, syncBrowserFavicon } from './components/AppIcons';
 import { ChessBoard } from './components/ChessBoard';
 import { MobileMoveBar } from './components/MobileMoveBar';
@@ -147,13 +148,21 @@ export default function App() {
     depth: 0,
   });
 
-  // Apply App Theme, Animation channels, Language attribute & Browser Favicon whenever preferences change
+  // Apply App Theme, Advanced Animation tokens, Language attribute & Browser Favicon whenever preferences change
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.appTheme = preferences.appTheme;
-    root.dataset.animationLevel = preferences.animationLevel;
-    root.dataset.uiTransitions = preferences.uiTransitions ? 'on' : 'off';
-    root.dataset.pieceMotion = preferences.pieceMoveAnimation ? 'on' : 'off';
+    const animTokens = resolveAnimationTokens(preferences);
+    for (const [prop, value] of Object.entries(animTokens.cssVars)) {
+      root.style.setProperty(prop, value);
+    }
+    root.dataset.animationLevel = animTokens.dataset.animationLevel;
+    root.dataset.pieceMotion = animTokens.dataset.pieceMotion;
+    root.dataset.badgeMotion = animTokens.dataset.badgeMotion;
+    root.dataset.highlightMotion = animTokens.dataset.highlightMotion;
+    root.dataset.evalMotion = animTokens.dataset.evalMotion;
+    root.dataset.uiTransitions = animTokens.dataset.uiTransitions;
+    root.dataset.pieceLift = animTokens.dataset.pieceLift;
     root.lang = preferences.language;
     syncBrowserFavicon(preferences.appIcon);
     savePreferences(preferences);
@@ -1004,19 +1013,19 @@ export default function App() {
 
   return (
     <LanguageProvider lang={preferences.language}>
-      <div className="min-h-screen w-full bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col anim-view-enter">
+      <div className="arena-shell min-h-screen w-full bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col anim-view-enter">
         {/* Compact Arena Utility Strip */}
-        <div className="w-full max-w-[1320px] mx-auto px-4 sm:px-6 pt-3 pb-1 flex items-center justify-between gap-4">
+        <div className="arena-topbar w-full max-w-[1320px] mx-auto px-4 sm:px-6 pt-3 pb-1 flex items-center justify-between gap-4 shrink-0">
           <button
             type="button"
             onClick={() => returnToHub('home')}
-            className="flex items-center gap-2.5 text-left group cursor-pointer anim-interactive"
+            className="flex items-center gap-2.5 text-left group cursor-pointer anim-interactive min-w-0"
           >
-            <AppLogoIcon iconId={preferences.appIcon} className="w-8 h-8 shrink-0" />
-            <span className="text-base font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">
+            <AppLogoIcon iconId={preferences.appIcon} className="w-7 h-7 sm:w-8 sm:h-8 shrink-0" />
+            <span className="text-sm sm:text-base font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">
               Crownline Chess
             </span>
-            <span className="hidden sm:inline text-xs text-[var(--app-text-muted)] whitespace-nowrap">
+            <span className="hidden sm:inline text-xs text-[var(--app-text-muted)] whitespace-nowrap truncate">
               ·{' '}
               {activeMode === 'stockfish'
                 ? `${translate(preferences.language, 'arenaVsStockfish')} ${activeLevel.elo}`
@@ -1037,7 +1046,7 @@ export default function App() {
                 e.currentTarget.blur();
                 returnToHub('home');
               }}
-              className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer anim-interactive"
+              className="arena-topbar-btn w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer anim-interactive"
             >
               <Home className="w-3.5 h-3.5" />
             </button>
@@ -1051,7 +1060,7 @@ export default function App() {
                 e.currentTarget.blur();
                 setShowNewMatchModal(true);
               }}
-              className="h-8 px-2.5 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap anim-interactive"
+              className="arena-topbar-btn h-8 px-2.5 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap anim-interactive"
             >
               <Plus className="w-3.5 h-3.5 text-[var(--app-accent)]" />
               <span className="hidden sm:inline">{translate(preferences.language, 'arenaNewBtn')}</span>
@@ -1066,7 +1075,7 @@ export default function App() {
               e.currentTarget.blur();
               setOrientation((o) => (o === 'w' ? 'b' : 'w'));
             }}
-            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
+            className="arena-topbar-btn w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
           >
             <ArrowUpDown className="w-3.5 h-3.5" />
           </button>
@@ -1080,7 +1089,7 @@ export default function App() {
               e.currentTarget.blur();
               updatePreferences({ muted: !preferences.muted });
             }}
-            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
+            className="arena-topbar-btn w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
           >
             {preferences.muted ? (
               <VolumeX className="w-3.5 h-3.5 text-[var(--app-text-muted)]" />
@@ -1098,7 +1107,7 @@ export default function App() {
               e.currentTarget.blur();
               returnToHub('settings');
             }}
-            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
+            className="arena-topbar-btn w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
           >
             <Settings className="w-3.5 h-3.5" />
           </button>
@@ -1112,7 +1121,7 @@ export default function App() {
               e.currentTarget.blur();
               setAppState((s) => (s === 'paused' ? 'playing' : 'paused'));
             }}
-            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
+            className="arena-topbar-btn w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
           >
             <Pause className="w-3.5 h-3.5" />
           </button>
@@ -1120,8 +1129,8 @@ export default function App() {
       </div>
 
       {/* Main Arena: Centered Chessboard + Right Dock */}
-      <main className="flex-1 w-full max-w-[1320px] mx-auto px-3 sm:px-6 py-2 sm:py-3 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-4 lg:gap-6">
-        <section aria-label="Chessboard arena" className="w-full max-w-[660px] flex flex-col">
+      <main className="arena-main flex-1 w-full max-w-[1320px] mx-auto px-3 sm:px-6 py-2 sm:py-3 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-4 lg:gap-6">
+        <section aria-label="Chessboard arena" className="arena-board-col w-full max-w-[660px] flex flex-col">
           {/* Mobile & Tablet Horizontal Move History Ribbon — stays in view with the board */}
           <MobileMoveBar
             moves={moves}
