@@ -1,0 +1,426 @@
+# Build & Release — Crownline Chess
+#
+# Tag kích hoạt:
+#   v*          -> build Web + Android (APK) + Windows (.exe) rồi tạo Release
+#   Android-v*  -> chỉ build Android (APK) rồi tạo Release
+#   Windows-v*  -> chỉ build Windows (.exe) rồi tạo Release
+# Tag phải có dạng semver: v1.2.3 / Android-v1.2.3 / Windows-v1.2.3-beta.1
+#
+# Chạy tay (workflow_dispatch): build tất cả, chỉ lưu artifact, KHÔNG tạo Release.
+#
+# Secrets (tuỳ chọn) để ký APK release:
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# Không có keystore -> build APK debug (cài được nhưng mỗi lần build chữ ký khác nhau).
+
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'Android-v*'
+      - 'Windows-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  APP_NAME: Crownline Chess
+  APP_SLUG: Crownline-Chess
+  APP_ID: com.minztogether.crownlinechess
+  NODE_VERSION: '22'
+  JAVA_VERSION: '21'
+  CAPACITOR_VERSION: '^8'
+  ELECTRON_VERSION: '^45'
+  ELECTRON_BUILDER_VERSION: '^26'
+
+jobs:
+  # ---------------------------------------------------------------- Web
+  web:
+    name: Web build & checks
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: meta
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
+            VERSION=$(echo "$TAG" | sed -E 's/^(Android-|Windows-)?v//')
+            if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+              echo "::error::Tag '$TAG' không hợp lệ. Dùng v1.2.3, Android-v1.2.3 hoặc Windows-v1.2.3"
+              exit 1
+            fi
+          else
+            VERSION="0.0.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run lint
+
+      - name: Unit tests
+        run: npx tsx --test "src/**/*.test.ts"
+
+      - name: Build
+        run: bun run build
+
+      - name: Upload dist (for Android/Windows jobs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 1
+
+      - name: Package web zip (v* only)
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p out
+          (cd dist && zip -r "$GITHUB_WORKSPACE/out/${APP_SLUG}-${VERSION}-Web.zip" .)
+
+      - name: Upload web zip
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-web
+          path: out/*.zip
+          if-no-files-found: error
+
+  # ------------------------------------------------------------ Android
+  android:
+    name: Android APK
+    needs: web
+    if: github.ref_type != 'tag' || !startsWith(github.ref_name, 'Windows-v')
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.web.outputs.version }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # App gốc chưa có Capacitor -> dựng project Android ngay trong runner, không sửa repo.
+      - name: Generate Capacitor Android project
+        run: |
+          mkdir android-shell
+          cp -r dist android-shell/dist
+          cd android-shell
+          npm init -y > /dev/null
+          npm install "@capacitor/core@${CAPACITOR_VERSION}" "@capacitor/cli@${CAPACITOR_VERSION}" "@capacitor/android@${CAPACITOR_VERSION}"
+          cat > capacitor.config.json <<EOF
+          {
+            "appId": "${APP_ID}",
+            "appName": "${APP_NAME}",
+            "webDir": "dist"
+          }
+          EOF
+          npx cap add android
+          sed -i -E "s/versionCode [0-9]+/versionCode ${GITHUB_RUN_NUMBER}/; s/versionName \"[^\"]*\"/versionName \"${VERSION}\"/" android/app/build.gradle
+          grep -nE "versionCode|versionName" android/app/build.gradle
+
+      - name: Build APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          OUT="$GITHUB_WORKSPACE/out/${APP_SLUG}-${VERSION}-Android"
+          cd android-shell/android
+          chmod +x gradlew
+
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            ./gradlew assembleRelease --no-daemon --stacktrace
+            BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export KEY_PASSWORD="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+            "$BT/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" sign \
+              --ks "$RUNNER_TEMP/release.keystore" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass env:KEYSTORE_PASSWORD \
+              --key-pass env:KEY_PASSWORD \
+              --out "$OUT.apk" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" verify "$OUT.apk"
+            rm -f "$RUNNER_TEMP/release.keystore"
+          else
+            echo "::warning::Không có ANDROID_KEYSTORE_BASE64 -> build APK debug (chữ ký debug thay đổi mỗi lần build)."
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            cp app/build/outputs/apk/debug/app-debug.apk "$OUT-debug.apk"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: out/*.apk
+          if-no-files-found: error
+
+  # ------------------------------------------------------------ Windows
+  windows:
+    name: Windows (.exe)
+    needs: web
+    if: github.ref_type != 'tag' || !startsWith(github.ref_name, 'Android-v')
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.web.outputs.version }}
+      OWNER: ${{ github.repository_owner }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # Electron bọc bản web. Stockfish worker dùng đường dẫn tuyệt đối (/stockfish/...)
+      # và app lưu localStorage, nên phục vụ dist qua HTTP 127.0.0.1 với cổng cố định
+      # thay vì file:// (file:// làm hỏng worker và mất dữ liệu giữa các lần mở).
+      - name: Create Electron shell
+        run: |
+          mkdir shell
+          cp -r dist shell/dist
+          cd shell
+
+          cat > server.cjs <<'EOF'
+          'use strict';
+          const http = require('http');
+          const fs = require('fs');
+          const path = require('path');
+
+          const MIME = {
+            '.html': 'text/html; charset=utf-8',
+            '.js': 'text/javascript; charset=utf-8',
+            '.mjs': 'text/javascript; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.json': 'application/json; charset=utf-8',
+            '.wasm': 'application/wasm',
+            '.svg': 'image/svg+xml',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.webp': 'image/webp',
+            '.ico': 'image/x-icon',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+            '.mp3': 'audio/mpeg',
+            '.ogg': 'audio/ogg',
+            '.wav': 'audio/wav',
+            '.txt': 'text/plain; charset=utf-8',
+          };
+
+          function startServer(root, preferredPort) {
+            const base = path.resolve(root);
+            const server = http.createServer(function (req, res) {
+              var pathname;
+              try {
+                pathname = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname);
+              } catch (e) {
+                res.writeHead(400);
+                res.end();
+                return;
+              }
+              var file = path.resolve(path.join(base, pathname));
+              if (file !== base && !file.startsWith(base + path.sep)) {
+                res.writeHead(403);
+                res.end();
+                return;
+              }
+              var send = function (target) {
+                var type = MIME[path.extname(target).toLowerCase()] || 'application/octet-stream';
+                res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+                fs.createReadStream(target).pipe(res);
+              };
+              fs.stat(file, function (err, st) {
+                if (!err && st.isDirectory()) {
+                  file = path.join(file, 'index.html');
+                  err = fs.existsSync(file) ? null : new Error('missing');
+                  st = { isFile: function () { return !err; } };
+                }
+                if (!err && st.isFile()) {
+                  send(file);
+                } else if (!path.extname(pathname)) {
+                  send(path.join(base, 'index.html'));
+                } else {
+                  res.writeHead(404);
+                  res.end();
+                }
+              });
+            });
+            return new Promise(function (resolve, reject) {
+              var attempt = function (port) {
+                server.once('error', function (err) {
+                  if (err.code === 'EADDRINUSE' && port !== 0) attempt(0);
+                  else reject(err);
+                });
+                server.listen(port, '127.0.0.1', function () {
+                  resolve(server.address().port);
+                });
+              };
+              attempt(preferredPort);
+            });
+          }
+
+          module.exports = { startServer: startServer };
+          EOF
+
+          cat > main.cjs <<'EOF'
+          'use strict';
+          const { app, BrowserWindow, shell } = require('electron');
+          const path = require('path');
+          const { startServer } = require('./server.cjs');
+
+          const PORT = 38417;
+          app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+          if (!app.requestSingleInstanceLock()) {
+            app.quit();
+          } else {
+            let win = null;
+            app.on('second-instance', function () {
+              if (win) {
+                if (win.isMinimized()) win.restore();
+                win.focus();
+              }
+            });
+            app.whenReady().then(async function () {
+              const port = await startServer(path.join(__dirname, 'dist'), PORT);
+              const origin = 'http://127.0.0.1:' + port;
+              win = new BrowserWindow({
+                width: 1280,
+                height: 820,
+                minWidth: 900,
+                minHeight: 600,
+                backgroundColor: '#181817',
+                autoHideMenuBar: true,
+                title: 'Crownline Chess',
+                webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+              });
+              win.setMenuBarVisibility(false);
+              win.webContents.setWindowOpenHandler(function (details) {
+                if (/^https?:/i.test(details.url) && !details.url.startsWith(origin)) {
+                  shell.openExternal(details.url);
+                }
+                return { action: 'deny' };
+              });
+              win.loadURL(origin + '/');
+            });
+            app.on('window-all-closed', function () { app.quit(); });
+          }
+          EOF
+
+          node -e '
+            const pkg = {
+              name: process.env.APP_SLUG.toLowerCase(),
+              productName: process.env.APP_NAME,
+              version: process.env.VERSION,
+              description: process.env.APP_NAME,
+              author: process.env.OWNER,
+              main: "main.cjs",
+              build: {
+                appId: process.env.APP_ID,
+                productName: process.env.APP_NAME,
+                directories: { output: "release" },
+                files: ["main.cjs", "server.cjs", "dist/**/*"],
+                win: { target: [{ target: "nsis", arch: ["x64"] }, { target: "portable", arch: ["x64"] }] },
+                nsis: {
+                  oneClick: false,
+                  allowToChangeInstallationDirectory: true,
+                  artifactName: process.env.APP_SLUG + "-${version}-Windows-x64-Setup.${ext}"
+                },
+                portable: { artifactName: process.env.APP_SLUG + "-${version}-Windows-x64-Portable.${ext}" }
+              }
+            };
+            require("fs").writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+          '
+
+      - name: Install Electron + electron-builder
+        working-directory: shell
+        run: npm install --save-dev "electron@${ELECTRON_VERSION}" "electron-builder@${ELECTRON_BUILDER_VERSION}"
+
+      - name: Build installer + portable
+        working-directory: shell
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Collect artifacts
+        run: |
+          mkdir out
+          cp shell/release/*.exe out/
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: out/*.exe
+          if-no-files-found: error
+
+  # ------------------------------------------------------------ Release
+  release:
+    name: Publish GitHub Release
+    needs: [web, android, windows]
+    if: ${{ !cancelled() && github.ref_type == 'tag' && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.web.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+
+      - name: Create or update release
+        run: |
+          ls -la release
+          FLAGS=""
+          case "$VERSION" in *-*) FLAGS="--prerelease" ;; esac
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --title "$TAG" --generate-notes $FLAGS
+          fi
+          
