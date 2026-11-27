@@ -862,9 +862,13 @@ export interface GameTermination {
   resultString: '1-0' | '0-1' | '1/2-1/2' | '*';
 }
 
+export type MatchVariant = 'standard' | 'custom' | 'random';
+
 export interface MatchSettings {
   mode: GameMode;
   playerSide: PlayerSideChoice;
   stockfishLevelId: string;
   timeControlId: string;
+  variant?: MatchVariant;
+  customFen?: string;
 }

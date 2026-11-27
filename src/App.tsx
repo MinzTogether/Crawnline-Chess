@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 import type { Color, PieceSymbol, Square } from 'chess.js';
-import { ArrowUpDown, Home, Pause, Plus, Settings, Volume2, VolumeX } from 'lucide-react';
+import { ArrowUpDown, Home, Pause, Plus, Settings, Shuffle, Volume2, VolumeX } from 'lucide-react';
 import {
   STOCKFISH_LEVELS,
   TIME_CONTROLS,
@@ -12,6 +12,7 @@ import {
   type EvalScore,
   type GameMode,
   type MatchSettings,
+  type MatchVariant,
   type MoveRecord,
 } from './types/chess';
 import {
@@ -34,6 +35,7 @@ import {
 } from './engine/evalStabilizer';
 import { calculateAverageAccuracy, classifyMove } from './engine/uciParser';
 import { buildPgn, evaluateGameTermination, getMaterialSummary, parsePgnOrFen } from './game/chessLogic';
+import { generateRandomChessFen } from './game/customPosition';
 import { detectOpening } from './game/openings';
 import { playChessSound } from './utils/sound';
 import { resolveAnimationTokens } from './utils/animationConfig';
@@ -112,6 +114,7 @@ export default function App() {
   const [humanColor, setHumanColor] = useState<Color>('w');
   const [orientation, setOrientation] = useState<Color>('w');
   const [activeMode, setActiveMode] = useState<GameMode>('stockfish');
+  const [activeVariant, setActiveVariant] = useState<MatchVariant>('standard');
   const [positionLabel, setPositionLabel] = useState<string | null>(null);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
 
@@ -320,18 +323,38 @@ export default function App() {
   const startMatch = useCallback(
     (customSettings?: MatchSettings) => {
       const cfg = customSettings ?? matchSettings;
+      if (customSettings) {
+        setMatchSettings(customSettings);
+      }
+      const variant: MatchVariant = cfg.variant ?? 'standard';
       const tc = TIME_CONTROLS.find((t) => t.id === cfg.timeControlId) ?? TIME_CONTROLS[4];
       const chosenSide = cfg.mode === 'analysis' ? 'w' : resolvePlayerColor(cfg.playerSide);
       const newMatchId = `match-${Date.now()}`;
+
+      let resolvedFen = INITIAL_FEN;
+      let resolvedLabel: string | null = null;
+      if (variant === 'random') {
+        resolvedFen = generateRandomChessFen();
+        resolvedLabel = translate(preferences.language, 'modeRandomTitle');
+      } else if (variant === 'custom' && cfg.customFen) {
+        try {
+          const check = new Chess(cfg.customFen);
+          resolvedFen = check.fen();
+          resolvedLabel = translate(preferences.language, 'modeCustomTitle');
+        } catch {
+          resolvedFen = INITIAL_FEN;
+        }
+      }
 
       opponentRef.current?.cancel();
       analyzerRef.current?.stop();
 
       setActiveMode(cfg.mode);
+      setActiveVariant(variant);
       setHumanColor(chosenSide);
       setOrientation(chosenSide);
-      setInitialFen(INITIAL_FEN);
-      setPositionLabel(null);
+      setInitialFen(resolvedFen);
+      setPositionLabel(resolvedLabel);
       setActiveMatchId(newMatchId);
       archivedMatchRef.current = null;
       setMoves([]);
@@ -345,7 +368,11 @@ export default function App() {
       setIsReviewing(false);
       setReviewProgress(0);
       setEngineAnalysis(null);
-      displayedEvalRef.current = { fen: INITIAL_FEN, score: { type: 'cp', value: 20 }, depth: 0 };
+      displayedEvalRef.current = {
+        fen: resolvedFen,
+        score: { type: 'cp', value: variant === 'standard' ? 20 : 0 },
+        depth: 0,
+      };
       setShowNewMatchModal(false);
 
       if (cfg.mode === 'analysis' || tc.initialSeconds === 0) {
@@ -366,7 +393,7 @@ export default function App() {
         document.activeElement.blur();
       }
     },
-    [matchSettings]
+    [matchSettings, preferences.language]
   );
 
   // Core move application
@@ -813,6 +840,7 @@ export default function App() {
       opponentRef.current?.cancel();
       setIsBotThinking(false);
       setActiveMode('analysis');
+      setActiveVariant('standard');
       setInitialFen(parsed.initialFen);
       setPositionLabel(label ?? (parsed.initialFen !== INITIAL_FEN ? 'Custom FEN Position' : 'Imported Match'));
       setActiveMatchId(null);
@@ -1043,6 +1071,11 @@ export default function App() {
             </span>
             <span className="hidden sm:inline text-xs text-[var(--app-text-muted)] whitespace-nowrap truncate">
               ·{' '}
+              {activeVariant === 'custom'
+                ? `${translate(preferences.language, 'modeCustomTitle')} · `
+                : activeVariant === 'random'
+                  ? `${translate(preferences.language, 'modeRandomTitle')} · `
+                  : ''}
               {activeMode === 'stockfish'
                 ? `${translate(preferences.language, 'arenaVsStockfish')} ${activeLevel.elo}`
                 : activeMode === 'local'
@@ -1066,6 +1099,24 @@ export default function App() {
             >
               <Home className="w-3.5 h-3.5" />
             </button>
+
+            {activeVariant === 'random' && activeMode !== 'analysis' && (
+              <button
+                type="button"
+                tabIndex={-1}
+                data-testid="arena-reshuffle-btn"
+                aria-label={translate(preferences.language, 'arenaReshuffleBtn')}
+                title={translate(preferences.language, 'arenaReshuffleBtn')}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  startMatch({ ...matchSettings, mode: activeMode, variant: 'random', customFen: undefined });
+                }}
+                className="arena-topbar-btn h-8 px-2.5 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap anim-interactive"
+              >
+                <Shuffle className="w-3.5 h-3.5 text-[#9C7EE6]" />
+                <span className="hidden sm:inline">{translate(preferences.language, 'arenaReshuffleBtn')}</span>
+              </button>
+            )}
 
             <button
               type="button"

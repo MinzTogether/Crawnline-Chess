@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import type { Color } from 'chess.js';
 import {
   ArrowLeft,
   Award,
@@ -9,6 +10,8 @@ import {
   Home,
   Lock,
   Settings,
+  Shuffle,
+  SlidersHorizontal,
   Swords,
   Trash2,
   Upload,
@@ -27,12 +30,26 @@ import {
   type SavedMatch,
   type UserProfile,
 } from '../types/preferences';
+import {
+  STANDARD_START_FEN,
+  fenToBoardMap,
+  validateCustomPosition,
+  type BoardMap,
+} from '../game/customPosition';
 import { useI18n } from '../i18n/LanguageContext';
 import { AppLogoIcon } from './AppIcons';
+import { CustomBoardEditor } from './CustomBoardEditor';
 import { SettingsSection, type SettingsSubPage } from './SettingsSection';
 
 export type HubSection = 'home' | 'settings' | 'profile';
-type HomeStep = 'root' | 'stockfish-setup' | 'person-select' | 'person-offline-setup' | 'analysis-setup';
+type HomeStep =
+  | 'root'
+  | 'stockfish-setup'
+  | 'person-select'
+  | 'person-offline-setup'
+  | 'custom-setup'
+  | 'random-setup'
+  | 'analysis-setup';
 
 const AVATAR_COLORS = ['#81B64C', '#5C9CE6', '#D99B3C', '#26C2A3', '#D96666', '#9C7EE6'];
 
@@ -119,6 +136,13 @@ export const MainHub: React.FC<MainHubProps> = ({
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const [settingsSubPage, setSettingsSubPage] = useState<SettingsSubPage>('root');
   const [homeStep, setHomeStep] = useState<HomeStep>('root');
+  const [customBoard, setCustomBoard] = useState<BoardMap>(() => fenToBoardMap(STANDARD_START_FEN));
+  const [customTurn, setCustomTurn] = useState<Color>('w');
+  const [variantOpponent, setVariantOpponent] = useState<'stockfish' | 'local'>('stockfish');
+  const customValidation = useMemo(
+    () => validateCustomPosition(customBoard, customTurn),
+    [customBoard, customTurn]
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const safeDisplayName = profile.displayName.trim() || 'Player';
   const safeTitle = profile.title.trim() || 'Chess Player';
@@ -406,7 +430,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                     {(
                       [
                         {
-                          id: 'stockfish' as GameMode,
+                          id: 'stockfish',
                           testId: 'mode-card-stockfish',
                           title: t('modeStockfishTitle'),
                           subtitle: t('modeStockfishDesc'),
@@ -415,12 +439,17 @@ export const MainHub: React.FC<MainHubProps> = ({
                           iconColor: '#81B64C',
                           icon: Cpu,
                           onSelect: () => {
-                            onChangeMatchSettings({ ...matchSettings, mode: 'stockfish' });
+                            onChangeMatchSettings({
+                              ...matchSettings,
+                              mode: 'stockfish',
+                              variant: 'standard',
+                              customFen: undefined,
+                            });
                             setHomeStep('stockfish-setup');
                           },
                         },
                         {
-                          id: 'local' as GameMode,
+                          id: 'local',
                           testId: 'mode-card-person',
                           title: t('modeLocalTitle'),
                           subtitle: t('modeLocalDesc'),
@@ -429,12 +458,43 @@ export const MainHub: React.FC<MainHubProps> = ({
                           iconColor: '#5089C6',
                           icon: Users,
                           onSelect: () => {
-                            onChangeMatchSettings({ ...matchSettings, mode: 'local' });
+                            onChangeMatchSettings({
+                              ...matchSettings,
+                              mode: 'local',
+                              variant: 'standard',
+                              customFen: undefined,
+                            });
                             setHomeStep('person-select');
                           },
                         },
                         {
-                          id: 'analysis' as GameMode,
+                          id: 'custom',
+                          testId: 'mode-card-custom',
+                          title: t('modeCustomTitle'),
+                          subtitle: t('modeCustomDesc'),
+                          meta: t('modeCustomMeta'),
+                          iconBg: 'rgba(217, 155, 60, 0.16)',
+                          iconColor: '#D99B3C',
+                          icon: SlidersHorizontal,
+                          onSelect: () => {
+                            setHomeStep('custom-setup');
+                          },
+                        },
+                        {
+                          id: 'random',
+                          testId: 'mode-card-random',
+                          title: t('modeRandomTitle'),
+                          subtitle: t('modeRandomDesc'),
+                          meta: t('modeRandomMeta'),
+                          iconBg: 'rgba(156, 126, 230, 0.16)',
+                          iconColor: '#9C7EE6',
+                          icon: Shuffle,
+                          onSelect: () => {
+                            setHomeStep('random-setup');
+                          },
+                        },
+                        {
+                          id: 'analysis',
                           testId: 'mode-card-analysis',
                           title: t('modeAnalysisTitle'),
                           subtitle: t('modeAnalysisDesc'),
@@ -443,7 +503,12 @@ export const MainHub: React.FC<MainHubProps> = ({
                           iconColor: '#1BADA6',
                           icon: Award,
                           onSelect: () => {
-                            onChangeMatchSettings({ ...matchSettings, mode: 'analysis' });
+                            onChangeMatchSettings({
+                              ...matchSettings,
+                              mode: 'analysis',
+                              variant: 'standard',
+                              customFen: undefined,
+                            });
                             setHomeStep('analysis-setup');
                           },
                         },
@@ -672,7 +737,14 @@ export const MainHub: React.FC<MainHubProps> = ({
                     type="button"
                     data-start="true"
                     data-testid="start-stockfish-match"
-                    onClick={() => onStartMatch({ ...matchSettings, mode: 'stockfish' })}
+                    onClick={() =>
+                      onStartMatch({
+                        ...matchSettings,
+                        mode: 'stockfish',
+                        variant: 'standard',
+                        customFen: undefined,
+                      })
+                    }
                     className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
                   >
                     <Swords className="w-4 h-4" />
@@ -876,7 +948,14 @@ export const MainHub: React.FC<MainHubProps> = ({
                     type="button"
                     data-start="true"
                     data-testid="start-person-offline-match"
-                    onClick={() => onStartMatch({ ...matchSettings, mode: 'local' })}
+                    onClick={() =>
+                      onStartMatch({
+                        ...matchSettings,
+                        mode: 'local',
+                        variant: 'standard',
+                        customFen: undefined,
+                      })
+                    }
                     className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
                   >
                     <Swords className="w-4 h-4" />
@@ -956,6 +1035,390 @@ export const MainHub: React.FC<MainHubProps> = ({
                       </button>
                     </div>
                   </form>
+                </div>
+              </div>
+            )}
+
+            {/* ================= STEP: CUSTOM POSITION SETUP (INTERACTIVE BOARD EDITOR) ================= */}
+            {homeStep === 'custom-setup' && (
+              <div
+                key="home-step-custom"
+                className="max-w-[1060px] w-full mx-auto flex flex-col gap-4 anim-view-enter"
+                data-testid="custom-setup-view"
+              >
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setHomeStep('root')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer anim-interactive"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>{t('backToModes')}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                  {/* Left: Interactive Custom Board Position Editor */}
+                  <div className="lg:col-span-7 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-4 sm:p-5 shadow-sm">
+                    <CustomBoardEditor
+                      board={customBoard}
+                      turn={customTurn}
+                      validation={customValidation}
+                      boardTheme={preferences.boardTheme}
+                      pieceStyle={preferences.pieceStyle}
+                      onChangeBoard={setCustomBoard}
+                      onChangeTurn={setCustomTurn}
+                    />
+                  </div>
+
+                  {/* Right: Match Settings for Custom Position */}
+                  <div className="lg:col-span-5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-5 shadow-sm">
+                    <div className="pb-4 border-b border-[var(--app-border)] flex items-center gap-3.5">
+                      <div
+                        className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
+                        style={{ backgroundColor: 'rgba(217, 155, 60, 0.16)' }}
+                      >
+                        <SlidersHorizontal className="w-5 h-5 text-[#D99B3C]" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[var(--app-accent)]">{t('setupCustomLabel')}</div>
+                        <h2 className="text-lg font-extrabold text-[var(--app-text)] mt-0.5 truncate">
+                          {t('modeCustomTitle')}
+                        </h2>
+                      </div>
+                    </div>
+
+                    {/* Opponent Selector */}
+                    <div>
+                      <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                        {t('opponentLabel')}
+                      </span>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(
+                          [
+                            { id: 'stockfish', label: t('opponentStockfish') },
+                            { id: 'local', label: t('opponentOffline') },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            data-testid={`custom-opponent-${opt.id}`}
+                            onClick={() => setVariantOpponent(opt.id)}
+                            className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
+                              variantOpponent === opt.id
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Stockfish Strength (only when playing vs Stockfish Bot) */}
+                    {variantOpponent === 'stockfish' && (
+                      <div>
+                        <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
+                          <span className="text-xs font-semibold text-[var(--app-text-muted)]">
+                            {t('stockfishStrength')}
+                          </span>
+                          <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)] whitespace-nowrap">
+                            {activeLevel.name} · {activeLevel.elo}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {STOCKFISH_LEVELS.map((lvl) => {
+                            const selected = lvl.id === matchSettings.stockfishLevelId;
+                            return (
+                              <button
+                                key={lvl.id}
+                                type="button"
+                                onClick={() =>
+                                  onChangeMatchSettings({ ...matchSettings, stockfishLevelId: lvl.id })
+                                }
+                                className={`py-2 px-2 rounded-lg text-left border transition-colors cursor-pointer anim-interactive ${
+                                  selected
+                                    ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                    : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                                }`}
+                              >
+                                <div className="text-xs font-mono font-bold tabular-nums">{lvl.elo}</div>
+                                <div className="text-[11px] truncate opacity-85">{lvl.name}</div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Time Control */}
+                    <div>
+                      <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                        {t('timeControl')}
+                      </span>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {TIME_CONTROLS.map((tc) => {
+                          const selected = tc.id === matchSettings.timeControlId;
+                          return (
+                            <button
+                              key={tc.id}
+                              type="button"
+                              onClick={() =>
+                                onChangeMatchSettings({ ...matchSettings, timeControlId: tc.id })
+                              }
+                              className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap truncate cursor-pointer anim-interactive ${
+                                tc.id === 'unlimited' ? 'col-span-2' : ''
+                              } ${
+                                selected
+                                  ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                  : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                              }`}
+                            >
+                              {tc.id === 'unlimited' ? t('unlimited') : tc.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Play As */}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-[var(--app-text-muted)]">{t('playAs')}</span>
+                      <div className="grid grid-cols-3 gap-1.5 flex-1 min-w-[180px] max-w-[260px]">
+                        {(
+                          [
+                            { id: 'w', label: t('white') },
+                            { id: 'random', label: t('random') },
+                            { id: 'b', label: t('black') },
+                          ] as { id: PlayerSideChoice; label: string }[]
+                        ).map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() =>
+                              onChangeMatchSettings({ ...matchSettings, playerSide: s.id })
+                            }
+                            className={`px-2 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
+                              matchSettings.playerSide === s.id
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      data-start="true"
+                      data-testid="start-custom-match"
+                      disabled={!customValidation.valid}
+                      onClick={() => {
+                        if (!customValidation.valid) return;
+                        onStartMatch({
+                          ...matchSettings,
+                          mode: variantOpponent,
+                          variant: 'custom',
+                          customFen: customValidation.fen,
+                        });
+                      }}
+                      className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] disabled:opacity-45 disabled:cursor-not-allowed text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
+                    >
+                      <Swords className="w-4 h-4" />
+                      <span>{t('startMatch')}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ================= STEP: RANDOM CHESS SETUP (CHAOS SHUFFLE) ================= */}
+            {homeStep === 'random-setup' && (
+              <div
+                key="home-step-random"
+                className="max-w-[680px] w-full mx-auto flex flex-col gap-4 anim-view-enter"
+                data-testid="random-setup-view"
+              >
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setHomeStep('root')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer anim-interactive"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>{t('backToModes')}</span>
+                  </button>
+                </div>
+
+                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm">
+                  <div className="pb-4 border-b border-[var(--app-border)] flex items-center gap-3.5">
+                    <div
+                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
+                      style={{ backgroundColor: 'rgba(156, 126, 230, 0.16)' }}
+                    >
+                      <Shuffle className="w-5 h-5 text-[#9C7EE6]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[var(--app-accent)]">{t('setupRandomLabel')}</div>
+                      <h2 className="text-lg sm:text-xl font-extrabold text-[var(--app-text)] mt-0.5 truncate">
+                        {t('modeRandomTitle')}
+                      </h2>
+                    </div>
+                  </div>
+
+                  {/* Rule-free Chaos Shuffle Summary */}
+                  <div className="p-3.5 rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border)]">
+                    <div className="text-xs font-bold text-[var(--app-text)]">{t('randomModeInfoTitle')}</div>
+                    <p className="text-xs text-[var(--app-text-muted)] mt-1 leading-relaxed">
+                      {t('randomModeInfoDesc')}
+                    </p>
+                  </div>
+
+                  {/* Opponent Selector */}
+                  <div>
+                    <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                      {t('opponentLabel')}
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          { id: 'stockfish', label: t('opponentStockfish') },
+                          { id: 'local', label: t('opponentOffline') },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          data-testid={`random-opponent-${opt.id}`}
+                          onClick={() => setVariantOpponent(opt.id)}
+                          className={`px-3 py-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
+                            variantOpponent === opt.id
+                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                              : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Stockfish Strength (when opponent is Stockfish Bot) */}
+                  {variantOpponent === 'stockfish' && (
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
+                        <span className="text-xs font-semibold text-[var(--app-text-muted)]">
+                          {t('stockfishStrength')}
+                        </span>
+                        <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)] whitespace-nowrap">
+                          {activeLevel.name} · {activeLevel.elo}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {STOCKFISH_LEVELS.map((lvl) => {
+                          const selected = lvl.id === matchSettings.stockfishLevelId;
+                          return (
+                            <button
+                              key={lvl.id}
+                              type="button"
+                              onClick={() =>
+                                onChangeMatchSettings({ ...matchSettings, stockfishLevelId: lvl.id })
+                              }
+                              className={`py-2.5 px-2.5 rounded-lg text-left border transition-colors cursor-pointer anim-interactive ${
+                                selected
+                                  ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                  : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                              }`}
+                            >
+                              <div className="text-xs font-mono font-bold tabular-nums">{lvl.elo}</div>
+                              <div className="text-[11px] truncate opacity-85">{lvl.name}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Time Control */}
+                  <div>
+                    <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                      {t('timeControl')}
+                    </span>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {TIME_CONTROLS.map((tc) => {
+                        const selected = tc.id === matchSettings.timeControlId;
+                        return (
+                          <button
+                            key={tc.id}
+                            type="button"
+                            onClick={() =>
+                              onChangeMatchSettings({ ...matchSettings, timeControlId: tc.id })
+                            }
+                            className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap truncate cursor-pointer anim-interactive ${
+                              tc.id === 'unlimited' ? 'col-span-2' : ''
+                            } ${
+                              selected
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                            }`}
+                          >
+                            {tc.id === 'unlimited' ? t('unlimited') : tc.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Play As */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-[var(--app-text-muted)]">{t('playAs')}</span>
+                    <div className="grid grid-cols-3 gap-1.5 flex-1 min-w-[190px] max-w-[280px]">
+                      {(
+                        [
+                          { id: 'w', label: t('white') },
+                          { id: 'random', label: t('random') },
+                          { id: 'b', label: t('black') },
+                        ] as { id: PlayerSideChoice; label: string }[]
+                      ).map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() =>
+                            onChangeMatchSettings({ ...matchSettings, playerSide: s.id })
+                          }
+                          className={`px-2 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
+                            matchSettings.playerSide === s.id
+                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                              : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-start="true"
+                    data-testid="start-random-match"
+                    onClick={() =>
+                      onStartMatch({
+                        ...matchSettings,
+                        mode: variantOpponent,
+                        variant: 'random',
+                        customFen: undefined,
+                      })
+                    }
+                    className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
+                  >
+                    <Shuffle className="w-4 h-4" />
+                    <span>{t('startMatch')}</span>
+                  </button>
                 </div>
               </div>
             )}
