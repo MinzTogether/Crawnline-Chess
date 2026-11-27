@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AlignJustify,
   Award,
   BookOpen,
   ChevronFirst,
@@ -15,6 +16,7 @@ import {
   RotateCcw,
   Sparkles,
   ArrowUpDown,
+  LayoutGrid,
   ListOrdered,
   Play,
 } from 'lucide-react';
@@ -107,17 +109,41 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onLoadStudy,
   pgnText,
 }) => {
-  const moveListEndRef = useRef<HTMLDivElement>(null);
+  const moveListContainerRef = useRef<HTMLDivElement>(null);
+  const activeMoveBtnRef = useRef<HTMLButtonElement | null>(null);
   const [importInput, setImportInput] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [copiedType, setCopiedType] = useState<'fen' | 'pgn' | null>(null);
+  const [moveViewMode, setMoveViewMode] = useState<'table' | 'flow'>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768 ? 'flow' : 'table'
+  );
 
+  // Scroll only inside the move list container (never scroll the outer window on mobile)
   useEffect(() => {
-    if (activeTab === 'moves' && viewPly === moves.length) {
-      moveListEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (activeTab !== 'moves') return;
+    const container = moveListContainerRef.current;
+    if (!container) return;
+
+    const activeEl = activeMoveBtnRef.current;
+    if (activeEl) {
+      const containerRect = container.getBoundingClientRect();
+      const activeRect = activeEl.getBoundingClientRect();
+      const relativeTop = activeRect.top - containerRect.top + container.scrollTop;
+      const relativeBottom = relativeTop + activeRect.height;
+
+      if (relativeTop < container.scrollTop) {
+        container.scrollTo({ top: Math.max(0, relativeTop - 8), behavior: 'smooth' });
+      } else if (relativeBottom > container.scrollTop + container.clientHeight) {
+        container.scrollTo({
+          top: Math.max(0, relativeBottom - container.clientHeight + 8),
+          behavior: 'smooth',
+        });
+      }
+    } else if (viewPly === 0) {
+      container.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [moves.length, viewPly, activeTab]);
+  }, [moves.length, viewPly, activeTab, moveViewMode]);
 
   const moveRows: { moveNumber: number; white?: MoveRecord; black?: MoveRecord }[] = [];
   for (const m of moves) {
@@ -138,12 +164,28 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
   const handleCopy = async (kind: 'fen' | 'pgn') => {
     const value = kind === 'fen' ? currentFen : pgnText;
+    let copied = false;
     try {
       await navigator.clipboard.writeText(value);
+      copied = true;
+    } catch {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {
+        copied = false;
+      }
+    }
+    if (copied) {
       setCopiedType(kind);
       setTimeout(() => setCopiedType(null), 1800);
-    } catch {
-      setCopiedType(null);
     }
   };
 
@@ -163,6 +205,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
   return (
     <aside
+      id="right-panel-dock"
       aria-label="Chess analysis and move history panel"
       className="w-full lg:w-[400px] xl:w-[430px] shrink-0 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl flex flex-col overflow-hidden lg:h-[calc(100vh-4.2rem)] lg:max-h-[820px]"
     >
@@ -222,29 +265,160 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 )}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => onTabChange('engine')}
-              className="text-xs font-semibold text-[var(--app-accent)] hover:underline whitespace-nowrap cursor-pointer shrink-0"
-            >
-              Lines →
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleCopy('pgn')}
+                disabled={moves.length === 0}
+                title="Copy full PGN to clipboard"
+                className="px-2 py-1 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1 transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                {copiedType === 'pgn' ? (
+                  <Check className="w-3 h-3 text-[var(--app-accent)]" />
+                ) : (
+                  <Copy className="w-3 h-3 text-[var(--app-text-muted)]" />
+                )}
+                <span>{copiedType === 'pgn' ? 'Copied' : 'Copy PGN'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onTabChange('engine')}
+                className="text-xs font-semibold text-[var(--app-accent)] hover:underline whitespace-nowrap cursor-pointer"
+              >
+                Lines →
+              </button>
+            </div>
           </div>
 
           <div className="px-3.5 pt-3">
             <EvalGraph moves={moves} viewPly={viewPly} onSelectPly={onSelectPly} liveEval={topScore} />
           </div>
 
-          <div className="flex-1 min-h-[180px] overflow-y-auto px-3.5 py-2.5" data-testid="move-history">
+          {/* Move History Sub-Header with Compact Flow / 2-Column Table Switcher */}
+          <div className="px-3.5 pt-2.5 pb-1 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold text-[var(--app-text-muted)] font-mono tabular-nums">
+              {moves.length === 0
+                ? 'Move History'
+                : `Move ${Math.ceil(viewPly / 2)} of ${Math.ceil(moves.length / 2)}`}
+            </span>
+            <div
+              role="group"
+              aria-label="Move history layout"
+              className="inline-flex items-center rounded-md bg-[var(--app-surface-2)] border border-[var(--app-border)] p-0.5"
+            >
+              <button
+                type="button"
+                aria-pressed={moveViewMode === 'flow'}
+                onClick={() => setMoveViewMode('flow')}
+                title="Compact flowing PGN chips (great for mobile)"
+                className={`px-2 py-1 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                  moveViewMode === 'flow'
+                    ? 'bg-[var(--app-surface)] text-[var(--app-text)] shadow-xs'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                }`}
+              >
+                <LayoutGrid className="w-3 h-3" />
+                <span>Compact</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={moveViewMode === 'table'}
+                onClick={() => setMoveViewMode('table')}
+                title="Classic 2-column move table"
+                className={`px-2 py-1 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                  moveViewMode === 'table'
+                    ? 'bg-[var(--app-surface)] text-[var(--app-text)] shadow-xs'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                }`}
+              >
+                <AlignJustify className="w-3 h-3" />
+                <span>Table</span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            ref={moveListContainerRef}
+            className="flex-1 min-h-[140px] max-h-[260px] lg:max-h-none overflow-y-auto px-3.5 py-2"
+            data-testid="move-history"
+          >
             {moveRows.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center py-8 px-4">
+              <div className="h-full flex flex-col items-center justify-center text-center py-6 px-4">
                 <p className="text-sm font-semibold text-[var(--app-text)]">No moves played yet</p>
                 <p className="text-xs text-[var(--app-text-muted)] mt-1 max-w-[240px]">
                   Click or drag any piece on the board to begin. Stockfish evaluates every position in real time.
                 </p>
               </div>
+            ) : moveViewMode === 'flow' ? (
+              /* Mobile-First Compact Flowing Move Pairs (move numbers never orphan) */
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5" data-testid="move-history-flow">
+                {moveRows.map((row) => (
+                  <div key={row.moveNumber} className="inline-flex items-center gap-1">
+                    <span className="text-[11px] font-mono tabular-nums text-[var(--app-text-subtle)] select-none">
+                      {row.moveNumber}.{!row.white && row.black ? '..' : ''}
+                    </span>
+                    {row.white && (
+                      <button
+                        ref={viewPly === row.white.ply ? activeMoveBtnRef : null}
+                        type="button"
+                        onClick={() => onSelectPly(row.white!.ply)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] rounded-lg font-mono text-xs border transition-colors cursor-pointer ${
+                          viewPly === row.white.ply
+                            ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)] border-[var(--app-accent)] font-extrabold shadow-xs'
+                            : 'bg-[var(--app-surface-2)] text-[var(--app-text)] border-[var(--app-border)] hover:bg-[var(--app-surface-hover)]'
+                        }`}
+                      >
+                        <span>{row.white.san}</span>
+                        {row.white.classification && (
+                          <span
+                            className="text-[10px] font-extrabold leading-none"
+                            style={{
+                              color:
+                                viewPly === row.white.ply
+                                  ? 'currentColor'
+                                  : CLASSIFICATION_META[row.white.classification].color,
+                            }}
+                            title={CLASSIFICATION_META[row.white.classification].label}
+                          >
+                            {CLASSIFICATION_META[row.white.classification].symbol}
+                          </span>
+                        )}
+                      </button>
+                    )}
+                    {row.black && (
+                      <button
+                        ref={viewPly === row.black.ply ? activeMoveBtnRef : null}
+                        type="button"
+                        onClick={() => onSelectPly(row.black!.ply)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] rounded-lg font-mono text-xs border transition-colors cursor-pointer ${
+                          viewPly === row.black.ply
+                            ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)] border-[var(--app-accent)] font-extrabold shadow-xs'
+                            : 'bg-[var(--app-surface-2)] text-[var(--app-text)] border-[var(--app-border)] hover:bg-[var(--app-surface-hover)]'
+                        }`}
+                      >
+                        <span>{row.black.san}</span>
+                        {row.black.classification && (
+                          <span
+                            className="text-[10px] font-extrabold leading-none"
+                            style={{
+                              color:
+                                viewPly === row.black.ply
+                                  ? 'currentColor'
+                                  : CLASSIFICATION_META[row.black.classification].color,
+                            }}
+                            title={CLASSIFICATION_META[row.black.classification].label}
+                          >
+                            {CLASSIFICATION_META[row.black.classification].symbol}
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             ) : (
-              <div className="flex flex-col gap-0.5">
+              /* Classic 2-Column Move Table with Touch-Friendly Mobile Targets */
+              <div className="flex flex-col gap-0.5" data-testid="move-history-table">
                 {moveRows.map((row) => (
                   <div
                     key={row.moveNumber}
@@ -256,11 +430,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
                     {row.white ? (
                       <button
+                        ref={viewPly === row.white.ply ? activeMoveBtnRef : null}
                         type="button"
                         onClick={() => onSelectPly(row.white!.ply)}
-                        className={`flex items-center justify-between gap-1 px-2 py-1 rounded text-left font-mono text-xs transition-colors cursor-pointer ${
+                        className={`flex items-center justify-between gap-1 px-2.5 py-2 lg:py-1 rounded text-left font-mono text-xs transition-colors cursor-pointer ${
                           viewPly === row.white.ply
-                            ? 'bg-[var(--app-accent-soft)] text-[var(--app-text)] font-bold'
+                            ? 'bg-[var(--app-accent-soft)] text-[var(--app-text)] font-bold ring-1 ring-[var(--app-accent)]/50'
                             : 'text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
                         }`}
                       >
@@ -281,11 +456,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
                     {row.black ? (
                       <button
+                        ref={viewPly === row.black.ply ? activeMoveBtnRef : null}
                         type="button"
                         onClick={() => onSelectPly(row.black!.ply)}
-                        className={`flex items-center justify-between gap-1 px-2 py-1 rounded text-left font-mono text-xs transition-colors cursor-pointer ${
+                        className={`flex items-center justify-between gap-1 px-2.5 py-2 lg:py-1 rounded text-left font-mono text-xs transition-colors cursor-pointer ${
                           viewPly === row.black.ply
-                            ? 'bg-[var(--app-accent-soft)] text-[var(--app-text)] font-bold'
+                            ? 'bg-[var(--app-accent-soft)] text-[var(--app-text)] font-bold ring-1 ring-[var(--app-accent)]/50'
                             : 'text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
                         }`}
                       >
@@ -305,7 +481,6 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                     )}
                   </div>
                 ))}
-                <div ref={moveListEndRef} />
               </div>
             )}
           </div>
@@ -342,7 +517,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   aria-label={btn.label}
                   disabled={btn.disabled}
                   onClick={btn.onClick}
-                  className="py-2 rounded-md flex items-center justify-center bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-35 text-[var(--app-text)] transition-colors cursor-pointer disabled:cursor-not-allowed"
+                  className="py-2.5 lg:py-2 rounded-md flex items-center justify-center bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-35 text-[var(--app-text)] transition-colors cursor-pointer disabled:cursor-not-allowed"
                 >
                   <Icon className="w-4 h-4" />
                 </button>
@@ -602,36 +777,52 @@ export const RightPanel: React.FC<RightPanelProps> = ({
       {/* TAB 4: LIBRARY, FEN/PGN IMPORT & EXPORT */}
       {activeTab === 'library' && (
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
-          <div className="flex flex-col gap-2">
-            <h2 className="text-xs font-bold text-[var(--app-text)]">Export Current Position</h2>
-            <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-lg p-2.5 font-mono text-[11px] text-[var(--app-text-muted)] break-all">
-              {currentFen}
+          <div className="flex flex-col gap-3">
+            {/* FEN Display & Copy */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xs font-bold text-[var(--app-text)]">Position FEN</h2>
+                <button
+                  type="button"
+                  onClick={() => handleCopy('fen')}
+                  className="py-1 px-2.5 rounded-md bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  {copiedType === 'fen' ? (
+                    <Check className="w-3 h-3 text-[var(--app-accent)]" />
+                  ) : (
+                    <Copy className="w-3 h-3 text-[var(--app-text-muted)]" />
+                  )}
+                  <span>{copiedType === 'fen' ? 'Copied FEN' : 'Copy FEN'}</span>
+                </button>
+              </div>
+              <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-lg p-2.5 font-mono text-[11px] text-[var(--app-text-muted)] break-all">
+                {currentFen}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleCopy('fen')}
-                className="py-2 px-3 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center justify-center gap-1.5 cursor-pointer"
+
+            {/* PGN Display Area & Copy PGN Button */}
+            <div className="flex flex-col gap-1.5" data-testid="pgn-display-area">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xs font-bold text-[var(--app-text)]">Game PGN</h2>
+                <button
+                  type="button"
+                  onClick={() => handleCopy('pgn')}
+                  className="py-1 px-2.5 rounded-md bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  {copiedType === 'pgn' ? (
+                    <Check className="w-3 h-3 text-[var(--app-accent)]" />
+                  ) : (
+                    <Copy className="w-3 h-3 text-[var(--app-text-muted)]" />
+                  )}
+                  <span>{copiedType === 'pgn' ? 'Copied PGN' : 'Copy PGN'}</span>
+                </button>
+              </div>
+              <pre
+                data-testid="pgn-display-text"
+                className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-lg p-2.5 font-mono text-[11px] text-[var(--app-text-muted)] whitespace-pre-wrap break-words max-h-36 overflow-y-auto m-0"
               >
-                {copiedType === 'fen' ? (
-                  <Check className="w-3.5 h-3.5 text-[var(--app-accent)]" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-                <span>{copiedType === 'fen' ? 'Copied FEN' : 'Copy FEN'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleCopy('pgn')}
-                className="py-2 px-3 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {copiedType === 'pgn' ? (
-                  <Check className="w-3.5 h-3.5 text-[var(--app-accent)]" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-                <span>{copiedType === 'pgn' ? 'Copied PGN' : 'Copy PGN'}</span>
-              </button>
+                {pgnText}
+              </pre>
             </div>
           </div>
 

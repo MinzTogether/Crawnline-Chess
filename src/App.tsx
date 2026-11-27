@@ -33,6 +33,7 @@ import { detectOpening } from './game/openings';
 import { playChessSound } from './utils/sound';
 import { AppLogoIcon, syncBrowserFavicon } from './components/AppIcons';
 import { ChessBoard } from './components/ChessBoard';
+import { MobileMoveBar } from './components/MobileMoveBar';
 import { PlayerBar } from './components/PlayerBar';
 import { RightPanel, type RightPanelTab } from './components/RightPanel';
 import { MainHub, type HubSection } from './components/MainHub';
@@ -1038,8 +1039,23 @@ export default function App() {
       </div>
 
       {/* Main Arena: Centered Chessboard + Right Dock */}
-      <main className="flex-1 w-full max-w-[1320px] mx-auto px-4 sm:px-6 py-3 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-6">
+      <main className="flex-1 w-full max-w-[1320px] mx-auto px-3 sm:px-6 py-2 sm:py-3 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-4 lg:gap-6">
         <section aria-label="Chessboard arena" className="w-full max-w-[660px] flex flex-col">
+          {/* Mobile & Tablet Horizontal Move History Ribbon — stays in view with the board */}
+          <MobileMoveBar
+            moves={moves}
+            viewPly={viewPly}
+            opening={opening}
+            onSelectPly={(ply) => {
+              setViewPly(ply);
+              setHintArrow(null);
+            }}
+            onJumpToMoveList={() => {
+              setRightTab('moves');
+              document.getElementById('right-panel-dock')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+          />
+
           <PlayerBar
             name={topColor === 'w' ? whiteName : blackName}
             subtitle={topColor === 'w' ? whiteSubtitle : blackSubtitle}
