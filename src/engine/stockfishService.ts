@@ -55,6 +55,8 @@ export class StockfishAnalyzer {
   private latestNps = 0;
   private bestMoveUci: string | null = null;
   private ponderUci: string | null = null;
+  private lastEmitAt = 0;
+  private emitTimer: number | null = null;
 
   async init(): Promise<void> {
     if (this.isReady && this.worker) return;
@@ -108,6 +110,13 @@ export class StockfishAnalyzer {
     return this.initPromise;
   }
 
+  private clearEmitTimer() {
+    if (this.emitTimer !== null) {
+      window.clearTimeout(this.emitTimer);
+      this.emitTimer = null;
+    }
+  }
+
   private scheduleJob(job: PendingJob) {
     if (!this.worker) return;
 
@@ -120,6 +129,7 @@ export class StockfishAnalyzer {
     if (this.phase === 'idle') {
       this.startQueuedJob();
     } else if (this.phase === 'searching') {
+      this.clearEmitTimer();
       this.phase = 'stopping';
       this.worker.postMessage('stop');
     }
@@ -127,6 +137,7 @@ export class StockfishAnalyzer {
   }
 
   private startQueuedJob() {
+    this.clearEmitTimer();
     if (!this.worker || !this.queuedJob) {
       this.phase = 'idle';
       return;
@@ -141,6 +152,7 @@ export class StockfishAnalyzer {
     this.latestNps = 0;
     this.bestMoveUci = null;
     this.ponderUci = null;
+    this.lastEmitAt = 0;
 
     if (job.multiPv !== this.currentMultiPv) {
       this.currentMultiPv = job.multiPv;
@@ -177,6 +189,7 @@ export class StockfishAnalyzer {
 
       const best = parseBestMoveLine(trimmed);
       if (best) {
+        this.clearEmitTimer();
         if (this.phase === 'stopping') {
           this.phase = 'idle';
           this.activeJob = null;
@@ -228,11 +241,33 @@ export class StockfishAnalyzer {
         if (parsedInfo.nps > 0) this.latestNps = parsedInfo.nps;
 
         if (this.activeJob.mode === 'stream' && this.activeJob.onUpdate) {
-          this.emitUpdate(this.activeJob, true);
+          this.scheduleThrottledEmit(this.activeJob);
         }
       }
     }
   };
+
+  private scheduleThrottledEmit(job: PendingJob) {
+    // Only emit once MultiPV 1 exists so line 2/3 never briefly masquerades as top score
+    if (!this.linesMap.has(1)) return;
+    const now = performance.now();
+    const minIntervalMs = 80;
+
+    if (now - this.lastEmitAt >= minIntervalMs) {
+      this.clearEmitTimer();
+      this.lastEmitAt = now;
+      this.emitUpdate(job, true);
+    } else if (this.emitTimer === null) {
+      const delay = minIntervalMs - (now - this.lastEmitAt);
+      this.emitTimer = window.setTimeout(() => {
+        this.emitTimer = null;
+        if (this.activeJob === job && this.phase === 'searching') {
+          this.lastEmitAt = performance.now();
+          this.emitUpdate(job, true);
+        }
+      }, delay);
+    }
+  }
 
   private emitUpdate(job: PendingJob, isSearching: boolean) {
     if (!job.onUpdate) return;
@@ -284,6 +319,7 @@ export class StockfishAnalyzer {
   }
 
   stop() {
+    this.clearEmitTimer();
     this.queuedJob = null;
     if (this.activeJob?.mode === 'single' && this.activeJob.resolveSingle) {
       this.activeJob.resolveSingle({ score: { type: 'cp', value: 0 }, bestMove: null });

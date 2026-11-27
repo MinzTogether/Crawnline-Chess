@@ -3,15 +3,15 @@ import { Chess } from 'chess.js';
 import type { Color, PieceSymbol, Square } from 'chess.js';
 import {
   BOARD_THEMES,
-  CLASSIFICATION_META,
   type BoardArrow,
   type BoardThemeId,
   type EvalScore,
   type MoveClassification,
 } from '../types/chess';
 import type { PieceStyleId } from '../types/preferences';
-import { evalToBarPercent, formatEvalScore } from '../engine/uciParser';
 import { ChessPiece } from './ChessPieces';
+import { EvalBar } from './EvalBar';
+import { MoveBadge } from './MoveBadge';
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
 const RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'] as const;
@@ -38,6 +38,8 @@ interface ChessBoardProps {
   showLegalMoves: boolean;
   showEvalBar: boolean;
   evalScore: EvalScore | null;
+  evalDepth?: number;
+  evalStabilizing?: boolean;
   onMove: (from: Square, to: Square, promotion?: PieceSymbol) => boolean;
 }
 
@@ -62,9 +64,11 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   showLegalMoves,
   showEvalBar,
   evalScore,
+  evalDepth = 0,
+  evalStabilizing = false,
   onMove,
 }) => {
-  const theme = BOARD_THEMES[themeId];
+  const theme = BOARD_THEMES[themeId] ?? BOARD_THEMES.tournament;
   const boardRef = useRef<HTMLDivElement>(null);
 
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
@@ -246,51 +250,20 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
     }
   };
 
-  const whiteBarPct = evalToBarPercent(evalScore);
-  const evalText = formatEvalScore(evalScore, false, true);
-  const whiteAhead = !evalScore || evalScore.value >= 0;
   const allArrows = [...engineArrows, ...userArrows];
 
   const draggedPiece = draggingFrom ? chess.get(draggingFrom) : null;
 
   return (
     <div className="flex items-stretch gap-2.5 w-full select-none">
-      {/* Vertical Stockfish Evaluation Bar */}
+      {/* Upgraded & Stabilized Vertical Stockfish Evaluation Bar */}
       {showEvalBar && (
-        <div
-          className="relative w-7 sm:w-8 shrink-0 rounded-[4px] overflow-hidden bg-[#2D2C29] border border-white/[0.08] flex flex-col justify-between"
-          data-testid="eval-bar"
-          aria-label={`Stockfish evaluation ${evalText}`}
-        >
-          {/* White portion — grows from bottom when White is at bottom, or from top when flipped */}
-          <div
-            className="absolute inset-x-0 bg-[#ECEAE4] transition-[height] duration-300 ease-out"
-            style={{
-              height: `${whiteBarPct}%`,
-              bottom: orientation === 'w' ? 0 : 'auto',
-              top: orientation === 'b' ? 0 : 'auto',
-            }}
-          />
-
-          {/* Center equality tick */}
-          <div className="absolute inset-x-0 top-1/2 h-[1.5px] bg-[#81B64C]/70 z-10 pointer-events-none" />
-
-          {/* Score readout pinned cleanly to the top or bottom depending on advantage */}
-          <span
-            className={`relative z-10 text-[10px] font-mono font-bold tabular-nums text-center pt-1.5 leading-none ${
-              orientation === 'w' ? 'text-[#ECEAE4]' : 'text-[#1E1D1B]'
-            }`}
-          >
-            {(!whiteAhead && orientation === 'w') || (whiteAhead && orientation === 'b') ? evalText : ''}
-          </span>
-          <span
-            className={`relative z-10 text-[10px] font-mono font-bold tabular-nums text-center pb-1.5 leading-none ${
-              orientation === 'w' ? 'text-[#1E1D1B]' : 'text-[#ECEAE4]'
-            }`}
-          >
-            {(whiteAhead && orientation === 'w') || (!whiteAhead && orientation === 'b') ? evalText : ''}
-          </span>
-        </div>
+        <EvalBar
+          score={evalScore}
+          orientation={orientation}
+          depth={evalDepth}
+          isStabilizing={evalStabilizing}
+        />
       )}
 
       {/* Main 8x8 Chessboard Container */}
@@ -330,8 +303,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
               }
 
               const coordColor = isLight ? theme.coordLight : theme.coordDark;
-              const classificationBadge =
-                isLastTo && lastMove?.classification ? CLASSIFICATION_META[lastMove.classification] : null;
+              const moveClassification = isLastTo && lastMove?.classification ? lastMove.classification : null;
 
               const pieceLabel = piece
                 ? `${piece.color === 'w' ? 'White' : 'Black'} ${PIECE_NAMES[piece.type]}`
@@ -409,15 +381,13 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                     </div>
                   )}
 
-                  {/* Chess.com-style classification badge on destination square */}
-                  {classificationBadge && (
-                    <span
-                      className="absolute -top-0.5 -right-0.5 z-20 w-5 h-5 sm:w-5.5 sm:h-5.5 rounded-full flex items-center justify-center text-[9px] sm:text-[10px] font-extrabold text-[#181817] shadow-md pointer-events-none"
-                      style={{ backgroundColor: classificationBadge.color }}
-                      title={classificationBadge.label}
-                    >
-                      {classificationBadge.symbol}
-                    </span>
+                  {/* Redesigned vector move evaluation badge on destination square */}
+                  {moveClassification && (
+                    <MoveBadge
+                      classification={moveClassification}
+                      variant="board"
+                      className="absolute -top-0.5 -right-0.5 z-20 pointer-events-none"
+                    />
                   )}
                 </button>
               );

@@ -9,6 +9,8 @@ export function parseUciInfoLine(line: string, sideToMove: Color): EngineLine | 
   if (!line.startsWith('info ')) return null;
   // Ignore pure currmove / string telemetry lines without score & pv
   if (!line.includes(' score ') || !line.includes(' pv ')) return null;
+  // Ignore aspiration-window lowerbound / upperbound intermediate lines that cause eval bar spikes
+  if (line.includes(' lowerbound ') || line.includes(' upperbound ')) return null;
 
   const tokens = line.trim().split(/\s+/);
   let depth = 0;
@@ -147,6 +149,7 @@ export function classifyMove(params: {
   playedUci: string;
   bestUci?: string | null;
   isBook?: boolean;
+  isSacrifice?: boolean;
 }): { classification: MoveClassification; accuracy: number; winProbLoss: number } {
   if (params.isBook) {
     return { classification: 'book', accuracy: 100, winProbLoss: 0 };
@@ -165,6 +168,10 @@ export function classifyMove(params: {
   const isExactBest = Boolean(params.bestUci && params.playedUci === params.bestUci);
 
   if (isExactBest || winProbLoss <= 1.2) {
+    // Award Brilliant for a strong tactical sacrifice that maintains or gains a winning edge
+    if (params.isSacrifice && isExactBest && moverProbAfter >= 55 && moverProbBefore < 92) {
+      return { classification: 'brilliant', accuracy: 100, winProbLoss: 0 };
+    }
     // Reward turning a close/tough position into a decisive tactical gain with the exact best move
     if (isExactBest && moverProbBefore >= 35 && moverProbBefore <= 68 && moverProbAfter >= moverProbBefore + 8) {
       return { classification: 'great', accuracy: 100, winProbLoss: 0 };

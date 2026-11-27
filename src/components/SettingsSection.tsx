@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ArrowLeft,
   Check,
@@ -9,7 +9,7 @@ import {
   SlidersHorizontal,
   Sparkles,
 } from 'lucide-react';
-import { BOARD_THEMES, type BoardThemeId } from '../types/chess';
+import { BOARD_THEMES, type BoardThemeCategory, type BoardThemeId } from '../types/chess';
 import {
   APP_THEMES,
   PIECE_STYLES,
@@ -49,13 +49,27 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
   preferences,
   onUpdatePreferences,
 }) => {
+  const [themeFilter, setThemeFilter] = useState<'all' | 'chesscom' | 'dark' | 'light'>('all');
+  const [boardCategoryFilter, setBoardCategoryFilter] = useState<'All' | BoardThemeCategory>('All');
+
   const activeTheme = APP_THEMES.find((t) => t.id === preferences.appTheme) ?? APP_THEMES[0];
   const activeIcon = APP_ICONS.find((i) => i.id === preferences.appIcon) ?? APP_ICONS[0];
   const activeBoard = BOARD_THEMES[preferences.boardTheme] ?? BOARD_THEMES.tournament;
   const activePiece = PIECE_STYLES[preferences.pieceStyle] ?? PIECE_STYLES.classic;
 
-  const darkThemes = APP_THEMES.filter((t) => !t.isLight);
-  const lightThemes = APP_THEMES.filter((t) => t.isLight);
+  const chessComThemes = APP_THEMES.filter((t) => t.isChessCom);
+  const darkThemes = APP_THEMES.filter((t) => !t.isLight && !t.isChessCom);
+  const lightThemes = APP_THEMES.filter((t) => t.isLight && !t.isChessCom);
+  const allDarkCount = APP_THEMES.filter((t) => !t.isLight).length;
+  const allLightCount = APP_THEMES.filter((t) => t.isLight).length;
+  const allBoards = [
+    ...Object.values(BOARD_THEMES).filter((b) => b.category === 'Chess.com'),
+    ...Object.values(BOARD_THEMES).filter((b) => b.category !== 'Chess.com'),
+  ];
+  const filteredBoards =
+    boardCategoryFilter === 'All'
+      ? allBoards
+      : allBoards.filter((b) => b.category === boardCategoryFilter);
 
   if (subPage === 'root') {
     return (
@@ -222,11 +236,16 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
               {subPage === 'gameplay' && 'Gameplay & Stockfish'}
             </h1>
             <p className="text-sm text-[var(--app-text-muted)] mt-1">
-              {subPage === 'app-theme' && 'Choose from 14 dark and daylight palettes applied immediately across the app.'}
-              {subPage === 'app-icon' && 'Futuristic frosted-jade and translucent crystal emblems synced to your sidebar and browser tab.'}
-              {subPage === 'board-theme' && 'Select from 14 tournament, wood, stone, and crystal chessboard finishes.'}
-              {subPage === 'piece-style' && 'Customize Staunton piece palettes including frosted jade, sapphire ice, and metallic finishes.'}
-              {subPage === 'gameplay' && 'Configure board overlays, audio cues, and default Stockfish WASM analysis depth.'}
+              {subPage === 'app-theme' &&
+                `Choose from ${APP_THEMES.length} Chess.com, dark, and daylight palettes applied immediately across the app.`}
+              {subPage === 'app-icon' &&
+                'Futuristic frosted-jade and translucent crystal emblems synced to your sidebar and browser tab.'}
+              {subPage === 'board-theme' &&
+                `Select from ${allBoards.length} Chess.com, classic, wood, stone, and modern chessboard finishes.`}
+              {subPage === 'piece-style' &&
+                'Customize Staunton piece palettes including frosted jade, sapphire ice, and metallic finishes.'}
+              {subPage === 'gameplay' &&
+                'Configure board overlays, audio cues, and default Stockfish WASM analysis depth.'}
             </p>
           </div>
         </div>
@@ -234,78 +253,150 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
 
       {/* SUB-PAGE 1: APP THEME */}
       {subPage === 'app-theme' && (
-        <div className="flex flex-col gap-6">
-          <section className="flex flex-col gap-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
-              Dark Themes ({darkThemes.length})
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {darkThemes.map((t) => {
-                const active = preferences.appTheme === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => onUpdatePreferences({ appTheme: t.id })}
-                    className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 ${
-                      active
-                        ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-                        : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-6 h-6 rounded-md border border-white/15" style={{ backgroundColor: t.swatchBg }} />
-                        <span className="w-6 h-6 rounded-md border border-white/15" style={{ backgroundColor: t.swatchSurface }} />
-                        <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchAccent }} />
-                      </div>
-                      {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
-                      <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{t.description}</div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
+        <div className="flex flex-col gap-5">
+          {/* Interactive Theme Filter Control */}
+          <div
+            role="group"
+            aria-label="Filter app themes"
+            className="self-start inline-flex flex-wrap items-center gap-1 p-1 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)]"
+          >
+            {(
+              [
+                { id: 'all', label: `All (${APP_THEMES.length})` },
+                { id: 'chesscom', label: `Chess.com (${chessComThemes.length})` },
+                { id: 'dark', label: `Dark (${allDarkCount})` },
+                { id: 'light', label: `Light (${allLightCount})` },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                aria-pressed={themeFilter === opt.id}
+                onClick={() => setThemeFilter(opt.id)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  themeFilter === opt.id
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)]'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
-          <section className="flex flex-col gap-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--app-text-muted)]">
-              Light Themes ({lightThemes.length})
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {lightThemes.map((t) => {
-                const active = preferences.appTheme === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => onUpdatePreferences({ appTheme: t.id })}
-                    className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 ${
-                      active
-                        ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-                        : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchBg }} />
-                        <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchSurface }} />
-                        <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchAccent }} />
+          {(themeFilter === 'all' || themeFilter === 'chesscom') && (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
+                Chess.com Themes ({chessComThemes.length})
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {chessComThemes.map((t) => {
+                  const active = preferences.appTheme === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onUpdatePreferences({ appTheme: t.id })}
+                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 ${
+                        active
+                          ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                          : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchBg }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchSurface }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchAccent }} />
+                        </div>
+                        {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
                       </div>
-                      {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
-                      <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{t.description}</div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
+                      <div>
+                        <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
+                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{t.description}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {(themeFilter === 'all' || themeFilter === 'dark') && (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
+                Dark Themes ({themeFilter === 'dark' ? allDarkCount : darkThemes.length})
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(themeFilter === 'dark' ? APP_THEMES.filter((t) => !t.isLight) : darkThemes).map((t) => {
+                  const active = preferences.appTheme === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onUpdatePreferences({ appTheme: t.id })}
+                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 ${
+                        active
+                          ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                          : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-6 h-6 rounded-md border border-white/15" style={{ backgroundColor: t.swatchBg }} />
+                          <span className="w-6 h-6 rounded-md border border-white/15" style={{ backgroundColor: t.swatchSurface }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchAccent }} />
+                        </div>
+                        {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
+                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{t.description}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {(themeFilter === 'all' || themeFilter === 'light') && (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
+                Light Themes ({themeFilter === 'light' ? allLightCount : lightThemes.length})
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(themeFilter === 'light' ? APP_THEMES.filter((t) => t.isLight) : lightThemes).map((t) => {
+                  const active = preferences.appTheme === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onUpdatePreferences({ appTheme: t.id })}
+                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 ${
+                        active
+                          ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                          : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchBg }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchSurface }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchAccent }} />
+                        </div>
+                        {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
+                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{t.description}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       )}
 
@@ -393,8 +484,34 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
             </div>
           </div>
 
+          {/* Interactive Board Category Filter */}
+          <div
+            role="group"
+            aria-label="Filter board themes by material"
+            className="flex flex-wrap items-center gap-1 p-1 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)] self-start"
+          >
+            {(['All', 'Chess.com', 'Classic', 'Wood', 'Stone', 'Modern'] as const).map((cat) => {
+              const count = cat === 'All' ? allBoards.length : allBoards.filter((b) => b.category === cat).length;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  aria-pressed={boardCategoryFilter === cat}
+                  onClick={() => setBoardCategoryFilter(cat)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    boardCategoryFilter === cat
+                      ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)]'
+                      : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                  }`}
+                >
+                  {cat} ({count})
+                </button>
+              );
+            })}
+          </div>
+
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {Object.values(BOARD_THEMES).map((b) => {
+            {filteredBoards.map((b) => {
               const active = preferences.boardTheme === b.id;
               return (
                 <button
@@ -424,7 +541,10 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                     })}
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-[var(--app-text)] truncate">{b.name}</span>
+                    <div className="min-w-0">
+                      <span className="block text-xs font-bold text-[var(--app-text)] truncate">{b.name}</span>
+                      <span className="block text-[10px] text-[var(--app-text-subtle)]">{b.category}</span>
+                    </div>
                     {active && <Check className="w-4 h-4 text-[var(--app-accent)] shrink-0" />}
                   </div>
                 </button>

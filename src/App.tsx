@@ -27,6 +27,11 @@ import {
 } from './types/preferences';
 import { StockfishAnalyzer, StockfishOpponent } from './engine/stockfishService';
 import { buildMatchRatingReport } from './engine/matchRating';
+import {
+  positionKeyFromFen,
+  stabilizeEvaluation,
+  type CachedEvalEntry,
+} from './engine/evalStabilizer';
 import { calculateAverageAccuracy, classifyMove } from './engine/uciParser';
 import { buildPgn, evaluateGameTermination, getMaterialSummary, parsePgnOrFen } from './game/chessLogic';
 import { detectOpening } from './game/openings';
@@ -49,6 +54,34 @@ function resolvePlayerColor(choice: MatchSettings['playerSide']): Color {
 function getAutostartFlag(): boolean {
   if (typeof window === 'undefined') return false;
   return new URLSearchParams(window.location.search).get('autostart') === '1';
+}
+
+const PIECE_VALUES: Record<PieceSymbol, number> = {
+  p: 1,
+  n: 3,
+  b: 3,
+  r: 5,
+  q: 9,
+  k: 0,
+};
+
+function isTacticalPieceSacrifice(move: MoveRecord): boolean {
+  if (move.piece === 'p' || move.piece === 'k') return false;
+  const movedVal = PIECE_VALUES[move.piece];
+  const capturedVal = move.captured ? PIECE_VALUES[move.captured] : 0;
+  // Moving a higher-value piece onto an attacked square or capturing a lesser piece / delivering forcing check
+  if (capturedVal < movedVal) {
+    try {
+      const after = new Chess(move.fenAfter);
+      const opponent: Color = move.color === 'w' ? 'b' : 'w';
+      if (after.isAttacked(move.to, opponent)) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 export default function App() {
@@ -105,6 +138,12 @@ export default function App() {
   const opponentRef = useRef<StockfishOpponent | null>(null);
   const latestAnalysisRef = useRef<EngineAnalysis | null>(null);
   const archivedMatchRef = useRef<string | null>(null);
+  const evalCacheRef = useRef<Map<string, CachedEvalEntry>>(new Map());
+  const displayedEvalRef = useRef<{ fen: string | null; score: EvalScore | null; depth: number }>({
+    fen: null,
+    score: null,
+    depth: 0,
+  });
 
   // Apply App Theme & Browser Favicon whenever preferences change
   useEffect(() => {
@@ -208,19 +247,20 @@ export default function App() {
   );
 
   // Player display names
+  const playerDisplayName = profile.displayName.trim() || 'Player';
   const whiteName =
     activeMode === 'stockfish'
       ? humanColor === 'w'
-        ? profile.displayName
+        ? playerDisplayName
         : `Stockfish (${activeLevel.name})`
       : activeMode === 'analysis'
         ? 'White'
-        : `${profile.displayName} (W)`;
+        : `${playerDisplayName} (W)`;
 
   const blackName =
     activeMode === 'stockfish'
       ? humanColor === 'b'
-        ? profile.displayName
+        ? playerDisplayName
         : `Stockfish (${activeLevel.name})`
       : activeMode === 'analysis'
         ? 'Black'
@@ -285,6 +325,7 @@ export default function App() {
       setIsReviewing(false);
       setReviewProgress(0);
       setEngineAnalysis(null);
+      displayedEvalRef.current = { fen: INITIAL_FEN, score: { type: 'cp', value: 20 }, depth: 0 };
       setShowNewMatchModal(false);
 
       if (cfg.mode === 'analysis' || tc.initialSeconds === 0) {
@@ -507,6 +548,7 @@ export default function App() {
                 playedUci: target.uci,
                 bestUci: target.bestMoveBefore,
                 isBook,
+                isSacrifice: isTacticalPieceSacrifice(target),
               });
               const updated = [...prev];
               updated[idx] = {
@@ -660,6 +702,12 @@ export default function App() {
             playedUci: m.uci,
             bestUci: prevResult.bestMove,
             isBook,
+            isSacrifice: isTacticalPieceSacrifice(m),
+          });
+
+          evalCacheRef.current.set(positionKeyFromFen(m.fenAfter), {
+            score: afterResult.score,
+            depth: 10,
           });
 
           reviewed[i] = {
@@ -757,6 +805,7 @@ export default function App() {
       setBlackClock(null);
       setHintArrow(null);
       setShowBestArrow(true);
+      displayedEvalRef.current = { fen: null, score: null, depth: 0 };
       setAppState('playing');
       setRightTab(autoRate ? 'rating' : 'moves');
 
@@ -880,6 +929,32 @@ export default function App() {
     return arrows;
   }, [hintArrow, showBestArrow, engineAnalysis, viewedFen, activeMode]);
 
+  const viewedLastMove = viewPly > 0 ? moves[viewPly - 1] : null;
+  const matchingEngineLine =
+    engineAnalysis && engineAnalysis.fen === viewedFen ? engineAnalysis.lines[0] ?? null : null;
+
+  const stabilizedEval = useMemo(() => {
+    if (appState === 'title') {
+      return {
+        score: null,
+        depth: 0,
+        isStabilizing: false,
+        nextDisplayed: displayedEvalRef.current,
+      };
+    }
+    const out = stabilizeEvaluation({
+      fen: viewedFen,
+      incomingScore: matchingEngineLine?.score ?? null,
+      incomingDepth: matchingEngineLine ? engineAnalysis?.depth ?? matchingEngineLine.depth : 0,
+      isSearching: Boolean(engineAnalysis && engineAnalysis.fen === viewedFen && engineAnalysis.isSearching),
+      storedMoveEval: viewedLastMove?.evalAfter ?? null,
+      cache: evalCacheRef.current,
+      displayed: displayedEvalRef.current,
+    });
+    displayedEvalRef.current = out.nextDisplayed;
+    return out;
+  }, [appState, viewedFen, matchingEngineLine, engineAnalysis, viewedLastMove?.evalAfter]);
+
   // Main Chess.com-style Hub (Home, Settings, Profile) before choosing a play mode
   if (appState === 'title') {
     return (
@@ -902,11 +977,7 @@ export default function App() {
   const topColor: Color = orientation === 'w' ? 'b' : 'w';
   const bottomColor: Color = orientation;
 
-  const viewedLastMove = viewPly > 0 ? moves[viewPly - 1] : null;
-  const activeEvalScore =
-    engineAnalysis && engineAnalysis.fen === viewedFen && engineAnalysis.lines[0]
-      ? engineAnalysis.lines[0].score
-      : viewedLastMove?.evalAfter ?? null;
+  const activeEvalScore = stabilizedEval.score;
 
   const canInteractWithBoard =
     appState === 'playing' &&
@@ -1094,6 +1165,8 @@ export default function App() {
             showLegalMoves={preferences.showLegalMoves}
             showEvalBar={preferences.showEvalBar}
             evalScore={activeEvalScore}
+            evalDepth={stabilizedEval.depth}
+            evalStabilizing={stabilizedEval.isStabilizing}
             onMove={applyMove}
           />
 

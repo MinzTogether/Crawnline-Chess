@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, ListOrdered } from 'lucide-react';
-import { CLASSIFICATION_META, type MoveRecord, type OpeningInfo } from '../types/chess';
+import { type MoveRecord, type OpeningInfo } from '../types/chess';
+import { MoveBadge } from './MoveBadge';
 
 interface MobileMoveBarProps {
   moves: MoveRecord[];
@@ -92,16 +93,7 @@ export const MobileMoveBar: React.FC<MobileMoveBarProps> = ({
                     }`}
                   >
                     <span>{m.san}</span>
-                    {m.classification && (
-                      <span
-                        className="text-[10px] font-extrabold leading-none"
-                        style={{
-                          color: isActive ? 'currentColor' : CLASSIFICATION_META[m.classification].color,
-                        }}
-                      >
-                        {CLASSIFICATION_META[m.classification].symbol}
-                      </span>
-                    )}
+                    {m.classification && <MoveBadge classification={m.classification} variant="inline" />}
                   </button>
                 </React.Fragment>
               );

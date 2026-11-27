@@ -3,6 +3,7 @@ import { Award, ChevronRight, Sparkles, Upload } from 'lucide-react';
 import { CLASSIFICATION_META, type EvalScore, type MoveRecord } from '../types/chess';
 import { buildMatchRatingReport } from '../engine/matchRating';
 import { EvalGraph } from './EvalGraph';
+import { MoveBadge } from './MoveBadge';
 
 interface MatchRatingPanelProps {
   moves: MoveRecord[];
@@ -183,9 +184,9 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
                 key={key}
                 className="grid grid-cols-[1fr_44px_44px] items-center text-xs py-1 font-mono tabular-nums"
               >
-                <span className="font-sans font-semibold flex items-center gap-2" style={{ color: meta.color }}>
-                  <span className="w-5 text-center font-mono text-[11px]">{meta.symbol}</span>
-                  <span>{label}</span>
+                <span className="font-sans font-semibold flex items-center gap-2 text-[var(--app-text)]">
+                  <MoveBadge classification={key} variant="legend" showTitle={false} />
+                  <span style={{ color: meta.color }}>{label}</span>
                 </span>
                 <span className="text-right font-bold text-[var(--app-text)]">{wCount}</span>
                 <span className="text-right font-bold text-[var(--app-text)]">{bCount}</span>
@@ -213,17 +214,20 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
                     : 'bg-[var(--app-surface-2)] border-[var(--app-border)] hover:bg-[var(--app-surface-hover)]'
                 }`}
               >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-xs font-mono font-bold">
-                    <span style={{ color: meta.color }}>
-                      {km.moveNumber}
-                      {km.color === 'w' ? '.' : '...'} {km.san} {meta.symbol}
-                    </span>
-                    <span className="text-[11px] font-sans font-normal text-[var(--app-text-muted)]">
-                      {meta.label}
-                    </span>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <MoveBadge classification={km.classification} variant="legend" showTitle={false} />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-xs font-mono font-bold">
+                      <span style={{ color: meta.color }}>
+                        {km.moveNumber}
+                        {km.color === 'w' ? '.' : '...'} {km.san}
+                      </span>
+                      <span className="text-[11px] font-sans font-normal text-[var(--app-text-muted)]">
+                        {meta.label}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">{km.headline}</p>
                   </div>
-                  <p className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">{km.headline}</p>
                 </div>
                 <ChevronRight className="w-3.5 h-3.5 text-[var(--app-text-subtle)] shrink-0" />
               </button>

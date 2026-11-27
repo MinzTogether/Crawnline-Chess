@@ -26,14 +26,21 @@ import {
   type UserProfile,
 } from '../types/preferences';
 import { AppLogoIcon } from './AppIcons';
-import { ChessBoard } from './ChessBoard';
 import { SettingsSection, type SettingsSubPage } from './SettingsSection';
 
 export type HubSection = 'home' | 'settings' | 'profile';
 
-const SHOWCASE_FEN = 'r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/2P2N2/PP1P1PPP/RNBQK2R w KQkq - 1 5';
-
 const AVATAR_COLORS = ['#81B64C', '#5C9CE6', '#D99B3C', '#26C2A3', '#D96666', '#9C7EE6'];
+
+function getProfileInitials(name: string): string {
+  const cleaned = name.trim();
+  if (!cleaned) return 'PL';
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return cleaned.slice(0, 2).toUpperCase();
+}
 
 /** Center-crops and compresses an uploaded image file to a 256x256 JPEG data URL for localStorage. */
 function processAvatarFile(file: File): Promise<string> {
@@ -107,6 +114,9 @@ export const MainHub: React.FC<MainHubProps> = ({
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const [settingsSubPage, setSettingsSubPage] = useState<SettingsSubPage>('root');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const safeDisplayName = profile.displayName.trim() || 'Player';
+  const safeTitle = profile.title.trim() || 'Chess Player';
+  const profileInitials = getProfileInitials(safeDisplayName);
 
   const handleSelectNavSection = (next: HubSection) => {
     if (next === 'settings') {
@@ -241,12 +251,12 @@ export const MainHub: React.FC<MainHubProps> = ({
         <button
           type="button"
           onClick={() => handleSelectNavSection('profile')}
-          className="flex items-center gap-3 p-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors text-left cursor-pointer"
+          className="w-full overflow-hidden flex items-center gap-3 p-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors text-left cursor-pointer"
         >
           {profile.avatarImage ? (
             <img
               src={profile.avatarImage}
-              alt={profile.displayName}
+              alt={safeDisplayName}
               className="w-9 h-9 rounded-lg shrink-0 object-cover border border-[var(--app-border-strong)]"
             />
           ) : (
@@ -254,184 +264,291 @@ export const MainHub: React.FC<MainHubProps> = ({
               className="w-9 h-9 rounded-lg shrink-0 flex items-center justify-center font-extrabold text-sm text-[#12160D]"
               style={{ backgroundColor: profile.avatarColor }}
             >
-              {profile.displayName.slice(0, 2).toUpperCase()}
+              {profileInitials}
             </div>
           )}
-          <div className="min-w-0">
-            <div className="text-xs font-bold text-[var(--app-text)] truncate">{profile.displayName}</div>
-            <div className="text-[11px] text-[var(--app-text-muted)] truncate">{profile.title}</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold text-[var(--app-text)] truncate">{safeDisplayName}</div>
+            <div className="text-[11px] text-[var(--app-text-muted)] truncate">{safeTitle}</div>
           </div>
         </button>
       </aside>
 
       {/* Mobile Top Brand Bar */}
-      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[var(--app-rail)] border-b border-[var(--app-border)]">
-        <div className="flex items-center gap-2.5">
+      <div className="md:hidden flex items-center justify-between gap-3 px-4 py-3 bg-[var(--app-rail)] border-b border-[var(--app-border)]">
+        <div className="flex items-center gap-2.5 shrink-0">
           <AppLogoIcon iconId={preferences.appIcon} className="w-8 h-8 shrink-0" />
-          <span className="text-base font-extrabold tracking-tight text-[var(--app-text)]">Crownline Chess</span>
+          <span className="text-base font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">
+            Crownline
+          </span>
         </div>
         <button
           type="button"
           onClick={() => handleSelectNavSection('profile')}
           className="flex items-center gap-2 min-w-0 cursor-pointer"
         >
-          {profile.avatarImage && (
+          {profile.avatarImage ? (
             <img
               src={profile.avatarImage}
-              alt={profile.displayName}
+              alt={safeDisplayName}
               className="w-6 h-6 rounded-md object-cover border border-[var(--app-border-strong)] shrink-0"
             />
+          ) : (
+            <div
+              className="w-6 h-6 rounded-md shrink-0 flex items-center justify-center font-extrabold text-[10px] text-[#12160D]"
+              style={{ backgroundColor: profile.avatarColor }}
+            >
+              {profileInitials}
+            </div>
           )}
-          <span className="text-xs font-semibold text-[var(--app-text-muted)] truncate max-w-[120px]">
-            {profile.displayName}
+          <span className="text-xs font-bold text-[var(--app-text)] truncate max-w-[160px]">
+            {safeDisplayName}
           </span>
         </button>
       </div>
 
       {/* Main Content Area */}
       <main className="flex-1 min-w-0 pb-20 md:pb-8">
-        {/* ================= HOME VIEW ================= */}
+        {/* ================= HOME VIEW (CHESS.COM-STYLE MODE LAUNCHER, NO BOARD) ================= */}
         {section === 'home' && (
-          <div className="max-w-[1160px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-8">
-            {/* Greeting Row */}
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--app-text)]">
-                  Welcome back, {profile.displayName}
-                </h1>
-                <p className="text-sm text-[var(--app-text-muted)] mt-1">
-                  Choose a play mode or launch Stockfish Match Rating to review any game.
-                </p>
+          <div className="max-w-[1120px] mx-auto px-4 sm:px-8 py-6 sm:py-9 flex flex-col gap-7" data-testid="home-mode-hub">
+            {/* Compact Player Header Row (Chess.com Home style) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[var(--app-border)]">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => handleSelectNavSection('profile')}
+                  aria-label={`Open profile for ${safeDisplayName}`}
+                  className="shrink-0 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)] cursor-pointer"
+                >
+                  {profile.avatarImage ? (
+                    <img
+                      src={profile.avatarImage}
+                      alt={safeDisplayName}
+                      className="w-12 h-12 rounded-xl object-cover border border-[var(--app-border-strong)]"
+                    />
+                  ) : (
+                    <div
+                      className="w-12 h-12 rounded-xl flex items-center justify-center font-extrabold text-base text-[#12160D]"
+                      style={{ backgroundColor: profile.avatarColor }}
+                    >
+                      {profileInitials}
+                    </div>
+                  )}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <h1
+                    data-testid="home-profile-name"
+                    className="text-2xl sm:text-[28px] font-extrabold tracking-tight text-[var(--app-text)] leading-tight truncate"
+                  >
+                    {safeDisplayName}
+                  </h1>
+                  <p className="text-sm text-[var(--app-text-muted)] mt-0.5 truncate">
+                    {safeTitle} · Choose a mode to play or rate a match with Stockfish
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center gap-3 text-xs text-[var(--app-text-muted)] font-mono tabular-nums">
+
+              <div className="flex items-center gap-3 text-xs text-[var(--app-text-muted)] font-mono tabular-nums shrink-0">
                 <span>{profileStats.total} Matches</span>
                 <span aria-hidden="true">·</span>
                 <span>Avg Acc: {profileStats.avgAcc !== null ? `${profileStats.avgAcc}%` : '—'}</span>
                 {profileStats.bestElo && (
                   <>
                     <span aria-hidden="true">·</span>
-                    <span className="text-[var(--app-accent)] font-bold">Best {profileStats.bestElo} Elo</span>
+                    <span className="text-[var(--app-accent)] font-bold">Peak {profileStats.bestElo} Elo</span>
                   </>
                 )}
               </div>
             </div>
 
-            {/* Chess.com-style 2-Column Lobby: Board Preview Left + Mode Chooser Right */}
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-7 items-start">
-              {/* Left Column: Board Centerpiece + Quick Mode Cards */}
-              <div className="xl:col-span-6 flex flex-col gap-5">
-                <div className="w-full max-w-[520px] mx-auto xl:mx-0">
-                  <ChessBoard
-                    fen={SHOWCASE_FEN}
-                    orientation="w"
-                    themeId={preferences.boardTheme}
-                    pieceStyle={preferences.pieceStyle}
-                    interactive={false}
-                    showCoordinates={preferences.showCoordinates}
-                    showLegalMoves={false}
-                    showEvalBar={preferences.showEvalBar}
-                    evalScore={{ type: 'cp', value: 42 }}
-                    lastMove={{ from: 'c2', to: 'c3' }}
-                    engineArrows={[
-                      { from: 'd2', to: 'd4', color: 'rgba(129, 182, 76, 0.88)', kind: 'best' },
-                    ]}
-                    onMove={() => false}
-                  />
-                </div>
+            {/* Chess.com-style 2-Column Mode Launcher (NO Chessboard): Mode List Left + Setup Panel Right */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Column: Chess.com-Style Stacked Mode Selection Cards + Recent Matches */}
+              <div className="lg:col-span-7 flex flex-col gap-6">
+                <section aria-label="Play modes" className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
+                      Select Mode
+                    </h2>
+                    <span className="text-xs text-[var(--app-text-subtle)]">
+                      Powered by Stockfish WASM
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    {(
+                      [
+                        {
+                          id: 'stockfish' as GameMode,
+                          title: 'Play Stockfish',
+                          subtitle: 'Challenge Stockfish bots from 800 Club Novice to 3100 Max strength',
+                          meta: `${activeLevel.name} · ${activeLevel.elo} Elo`,
+                          iconBg: 'rgba(129, 182, 76, 0.16)',
+                          iconColor: '#81B64C',
+                          icon: Cpu,
+                        },
+                        {
+                          id: 'local' as GameMode,
+                          title: 'Pass & Play',
+                          subtitle: 'Play an over-the-board match with a friend on this device with live clocks',
+                          meta: '2 Players · Local Board',
+                          iconBg: 'rgba(80, 137, 198, 0.16)',
+                          iconColor: '#5089C6',
+                          icon: Users,
+                        },
+                        {
+                          id: 'analysis' as GameMode,
+                          title: 'Analysis & Match Rating',
+                          subtitle: 'Import any PGN or inspect a board for Accuracy %, Game Elo & move icons',
+                          meta: 'Game Review · MultiPV',
+                          iconBg: 'rgba(27, 173, 166, 0.16)',
+                          iconColor: '#1BADA6',
+                          icon: Award,
+                        },
+                      ]
+                    ).map((card) => {
+                      const Icon = card.icon;
+                      const active = matchSettings.mode === card.id;
+                      return (
+                        <button
+                          key={card.id}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => onChangeMatchSettings({ ...matchSettings, mode: card.id })}
+                          className={`w-full p-4 sm:p-5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-4 group ${
+                            active
+                              ? 'bg-[var(--app-surface)] border-[var(--app-accent)] shadow-sm'
+                              : 'bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-border-strong)] hover:bg-[var(--app-surface-hover)]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-4 min-w-0">
+                            <div
+                              className="w-13 h-13 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
+                              style={{ backgroundColor: card.iconBg }}
+                            >
+                              <Icon className="w-6 h-6" style={{ color: card.iconColor }} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base sm:text-lg font-extrabold text-[var(--app-text)] leading-tight truncate">
+                                  {card.title}
+                                </span>
+                              </div>
+                              <p className="text-xs sm:text-[13px] text-[var(--app-text-muted)] mt-1 leading-snug">
+                                {card.subtitle}
+                              </p>
+                              <div className="text-[11px] font-mono tabular-nums text-[var(--app-text-subtle)] mt-1.5">
+                                {card.meta}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg">
+                            {active ? (
+                              <Check className="w-5 h-5 text-[var(--app-accent)]" />
+                            ) : (
+                              <ChevronRight className="w-5 h-5 text-[var(--app-text-subtle)] group-hover:text-[var(--app-text)] transition-colors" />
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                {/* Recent Matches Strip with One-Click "Rate Match" */}
+                <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-sm font-bold text-[var(--app-text)]">Recent Matches</h2>
+                    <button
+                      type="button"
+                      onClick={() => onChangeSection('profile')}
+                      className="text-xs font-semibold text-[var(--app-accent)] hover:underline cursor-pointer"
+                    >
+                      View All →
+                    </button>
+                  </div>
+                  <div className="flex flex-col divide-y divide-[var(--app-border)]">
+                    {savedMatches.slice(0, 3).map((m) => (
+                      <div key={m.id} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs sm:text-sm font-bold text-[var(--app-text)] truncate">
+                            {m.whiteName} vs {m.blackName}
+                          </div>
+                          <div className="text-[11px] text-[var(--app-text-muted)] flex items-center gap-1.5 font-mono tabular-nums mt-0.5">
+                            <span className="font-bold text-[var(--app-text)]">{m.result}</span>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-sans truncate">{m.openingName}</span>
+                            {typeof m.whiteAccuracy === 'number' && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span>{m.whiteAccuracy.toFixed(0)}%</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onOpenMatchRating(m.pgn, `${m.whiteName} vs ${m.blackName}`)}
+                          className="px-3.5 py-2 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-accent)] hover:text-[var(--app-accent-fg)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          Rate Match
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               </div>
 
-              {/* Right Column: Mode Cards + Quick Match Launch */}
-              <div className="xl:col-span-6 flex flex-col gap-4">
-                {/* 3 Core Mode Cards (NO Puzzles, NO Daily Puzzles, NO Learning Mode) */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {(
-                    [
-                      {
-                        id: 'stockfish' as GameMode,
-                        title: 'Play Stockfish',
-                        desc: '800–3100 Elo engine',
-                        icon: Cpu,
-                      },
-                      {
-                        id: 'local' as GameMode,
-                        title: 'Pass & Play',
-                        desc: '2 players, 1 board',
-                        icon: Users,
-                      },
-                      {
-                        id: 'analysis' as GameMode,
-                        title: 'Rate Match',
-                        desc: 'Stockfish game rating',
-                        icon: Award,
-                      },
-                    ]
-                  ).map((card) => {
-                    const Icon = card.icon;
-                    const active = matchSettings.mode === card.id;
-                    return (
-                      <button
-                        key={card.id}
-                        type="button"
-                        onClick={() => onChangeMatchSettings({ ...matchSettings, mode: card.id })}
-                        className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer flex flex-col gap-2 ${
-                          active
-                            ? 'bg-[var(--app-surface)] border-[var(--app-accent)] shadow-sm'
-                            : 'bg-[var(--app-surface-2)] border-[var(--app-border)] hover:bg-[var(--app-surface)]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <Icon
-                            className={`w-5 h-5 ${
-                              active ? 'text-[var(--app-accent)]' : 'text-[var(--app-text-muted)]'
-                            }`}
-                          />
-                          {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
-                        </div>
-                        <div>
-                          <div className="text-sm font-bold text-[var(--app-text)] leading-tight">
-                            {card.title}
-                          </div>
-                          <div className="text-[11px] text-[var(--app-text-muted)] mt-0.5">{card.desc}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+              {/* Right Column: Sticky Chess.com-Style Match Setup & Launch Panel */}
+              <div className="lg:col-span-5 lg:sticky lg:top-6">
+                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm">
+                  {/* Panel Header */}
+                  <div className="pb-4 border-b border-[var(--app-border)]">
+                    <div className="text-xs font-semibold text-[var(--app-accent)]">
+                      {matchSettings.mode === 'stockfish'
+                        ? 'Engine Match Setup'
+                        : matchSettings.mode === 'local'
+                          ? 'Local Match Setup'
+                          : 'Stockfish Game Review'}
+                    </div>
+                    <h2 className="text-lg font-extrabold text-[var(--app-text)] mt-0.5">
+                      {matchSettings.mode === 'stockfish'
+                        ? 'Play Stockfish'
+                        : matchSettings.mode === 'local'
+                          ? 'Pass & Play'
+                          : 'Analysis & Match Rating'}
+                    </h2>
+                  </div>
 
-                {/* Active Mode Config Panel */}
-                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-4 shadow-sm">
                   {matchSettings.mode === 'analysis' ? (
                     <>
-                      <div>
-                        <h2 className="text-base font-extrabold text-[var(--app-text)]">
-                          Analysis &amp; Match Rating Mode
-                        </h2>
-                        <p className="text-xs text-[var(--app-text-muted)] mt-1">
-                          Paste a PGN to calculate White &amp; Black Accuracy %, Estimated Game Elo, Phase Ratings, and Key Moments — or open an empty Stockfish Analysis Board.
-                        </p>
-                      </div>
+                      <p className="text-xs text-[var(--app-text-muted)] leading-relaxed -mt-1">
+                        Paste a PGN to calculate White &amp; Black Accuracy %, Estimated Game Elo, Phase Ratings, and Chess.com-style move icons — or open an empty Stockfish Analysis Board.
+                      </p>
 
-                      <form onSubmit={handleQuickRateSubmit} className="flex flex-col gap-2.5">
+                      <form onSubmit={handleQuickRateSubmit} className="flex flex-col gap-3">
                         <label htmlFor="hub-pgn-rate" className="text-xs font-semibold text-[var(--app-text-muted)]">
                           PGN to Rate (Optional)
                         </label>
                         <textarea
                           id="hub-pgn-rate"
-                          rows={3}
+                          rows={4}
                           value={pgnQuickInput}
                           onChange={(e) => {
                             setPgnQuickInput(e.target.value);
                             if (pgnQuickError) setPgnQuickError(null);
                           }}
                           placeholder="1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5..."
-                          className="w-full rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:outline-none p-2.5 text-xs font-mono text-[var(--app-text)] resize-none"
+                          className="w-full rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:outline-none p-3 text-xs font-mono text-[var(--app-text)] resize-none"
                         />
                         {pgnQuickError && <p className="text-xs text-[#E04F4F]">{pgnQuickError}</p>}
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                        <div className="flex flex-col gap-2.5 pt-1">
                           <button
                             type="submit"
-                            className="py-3 px-4 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-sm transition-colors shadow-[0_3px_0_var(--app-accent-shadow)] cursor-pointer whitespace-nowrap"
+                            className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-sm transition-colors shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer whitespace-nowrap"
                           >
                             Rate PGN Match
                           </button>
@@ -439,7 +556,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                             type="button"
                             data-start="true"
                             onClick={() => onOpenMatchRating()}
-                            className="py-3 px-4 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-bold text-sm transition-colors cursor-pointer whitespace-nowrap"
+                            className="w-full py-3 px-4 rounded-xl bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-bold text-sm transition-colors cursor-pointer whitespace-nowrap"
                           >
                             Open Analysis Board
                           </button>
@@ -456,10 +573,10 @@ export const MainHub: React.FC<MainHubProps> = ({
                               Stockfish Engine Strength
                             </span>
                             <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)]">
-                              {activeLevel.name} · {activeLevel.elo} Elo
+                              {activeLevel.name} · {activeLevel.elo}
                             </span>
                           </div>
-                          <div className="grid grid-cols-3 gap-1.5">
+                          <div className="grid grid-cols-3 gap-2">
                             {STOCKFISH_LEVELS.map((lvl) => {
                               const selected = lvl.id === matchSettings.stockfishLevelId;
                               return (
@@ -469,7 +586,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                                   onClick={() =>
                                     onChangeMatchSettings({ ...matchSettings, stockfishLevelId: lvl.id })
                                   }
-                                  className={`py-2 px-2.5 rounded-lg text-left border transition-colors cursor-pointer ${
+                                  className={`py-2.5 px-2.5 rounded-lg text-left border transition-colors cursor-pointer ${
                                     selected
                                       ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
                                       : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
@@ -497,7 +614,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                                 key={tc.id}
                                 type="button"
                                 onClick={() => onChangeMatchSettings({ ...matchSettings, timeControlId: tc.id })}
-                                className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap cursor-pointer ${
+                                className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap cursor-pointer ${
                                   selected
                                     ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
                                     : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
@@ -526,7 +643,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                                 key={s.id}
                                 type="button"
                                 onClick={() => onChangeMatchSettings({ ...matchSettings, playerSide: s.id })}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                                className={`px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
                                   matchSettings.playerSide === s.id
                                     ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
                                     : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
@@ -543,56 +660,13 @@ export const MainHub: React.FC<MainHubProps> = ({
                         type="button"
                         data-start="true"
                         onClick={() => onStartMatch()}
-                        className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] active:scale-[0.99] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap"
+                        className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] active:scale-[0.99] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1"
                       >
                         <Swords className="w-4 h-4" />
                         <span>{matchSettings.mode === 'stockfish' ? 'Play Stockfish' : 'Start Pass & Play'}</span>
                       </button>
                     </>
                   )}
-                </div>
-
-                {/* Recent Matches Strip with One-Click "Rate Match" */}
-                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-4 flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-sm font-bold text-[var(--app-text)]">Recent Matches</h2>
-                    <button
-                      type="button"
-                      onClick={() => onChangeSection('profile')}
-                      className="text-xs font-semibold text-[var(--app-accent)] hover:underline cursor-pointer"
-                    >
-                      View All →
-                    </button>
-                  </div>
-                  <div className="flex flex-col divide-y divide-[var(--app-border)]">
-                    {savedMatches.slice(0, 3).map((m) => (
-                      <div key={m.id} className="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-[var(--app-text)] truncate">
-                            {m.whiteName} vs {m.blackName}
-                          </div>
-                          <div className="text-[11px] text-[var(--app-text-muted)] flex items-center gap-1.5 font-mono tabular-nums mt-0.5">
-                            <span className="font-bold text-[var(--app-text)]">{m.result}</span>
-                            <span aria-hidden="true">·</span>
-                            <span className="font-sans truncate">{m.openingName}</span>
-                            {typeof m.whiteAccuracy === 'number' && (
-                              <>
-                                <span aria-hidden="true">·</span>
-                                <span>{m.whiteAccuracy.toFixed(0)}%</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => onOpenMatchRating(m.pgn, `${m.whiteName} vs ${m.blackName}`)}
-                          className="px-3 py-1.5 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-accent)] hover:text-[var(--app-accent-fg)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                        >
-                          Rate Match
-                        </button>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </div>
             </div>
@@ -642,7 +716,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                   {profile.avatarImage ? (
                     <img
                       src={profile.avatarImage}
-                      alt={profile.displayName}
+                      alt={safeDisplayName}
                       data-testid="profile-avatar-img"
                       className="w-full h-full object-cover"
                     />
@@ -651,7 +725,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                       className="w-full h-full flex items-center justify-center text-2xl font-extrabold text-[#12160D]"
                       style={{ backgroundColor: profile.avatarColor }}
                     >
-                      {profile.displayName.slice(0, 2).toUpperCase()}
+                      {profileInitials}
                     </div>
                   )}
                   <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 text-white text-[11px] font-bold">
@@ -710,6 +784,10 @@ export const MainHub: React.FC<MainHubProps> = ({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
+                  onUpdateProfile({
+                    displayName: profile.displayName.trim() || 'Player',
+                    title: profile.title.trim() || 'Club Player',
+                  });
                   setProfileSavedToast(true);
                   setTimeout(() => setProfileSavedToast(false), 1800);
                 }}
@@ -722,8 +800,15 @@ export const MainHub: React.FC<MainHubProps> = ({
                   <input
                     id="profile-name"
                     type="text"
+                    maxLength={40}
+                    placeholder="Enter display name"
                     value={profile.displayName}
-                    onChange={(e) => onUpdateProfile({ displayName: e.target.value || 'Player' })}
+                    onChange={(e) => onUpdateProfile({ displayName: e.target.value })}
+                    onBlur={() => {
+                      if (!profile.displayName.trim()) {
+                        onUpdateProfile({ displayName: 'Player' });
+                      }
+                    }}
                     className="rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:outline-none px-3 py-2 text-sm font-semibold text-[var(--app-text)]"
                   />
                 </div>

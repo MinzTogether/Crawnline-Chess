@@ -21,7 +21,6 @@ import {
   Play,
 } from 'lucide-react';
 import {
-  CLASSIFICATION_META,
   type ClassicStudy,
   type EngineAnalysis,
   type GameMode,
@@ -33,6 +32,7 @@ import { formatPvSanWithNumbers } from '../game/chessLogic';
 import { CLASSIC_STUDIES } from '../game/openings';
 import { EvalGraph } from './EvalGraph';
 import { MatchRatingPanel } from './MatchRatingPanel';
+import { MoveBadge } from './MoveBadge';
 
 export type RightPanelTab = 'moves' | 'rating' | 'engine' | 'library';
 
@@ -370,18 +370,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       >
                         <span>{row.white.san}</span>
                         {row.white.classification && (
-                          <span
-                            className="text-[10px] font-extrabold leading-none"
-                            style={{
-                              color:
-                                viewPly === row.white.ply
-                                  ? 'currentColor'
-                                  : CLASSIFICATION_META[row.white.classification].color,
-                            }}
-                            title={CLASSIFICATION_META[row.white.classification].label}
-                          >
-                            {CLASSIFICATION_META[row.white.classification].symbol}
-                          </span>
+                          <MoveBadge classification={row.white.classification} variant="inline" />
                         )}
                       </button>
                     )}
@@ -390,7 +379,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         ref={viewPly === row.black.ply ? activeMoveBtnRef : null}
                         type="button"
                         onClick={() => onSelectPly(row.black!.ply)}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[34px] rounded-lg font-mono text-xs border transition-colors cursor-pointer ${
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 min-h-[34px] rounded-lg font-mono text-xs border transition-colors cursor-pointer ${
                           viewPly === row.black.ply
                             ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)] border-[var(--app-accent)] font-extrabold shadow-xs'
                             : 'bg-[var(--app-surface-2)] text-[var(--app-text)] border-[var(--app-border)] hover:bg-[var(--app-surface-hover)]'
@@ -398,18 +387,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       >
                         <span>{row.black.san}</span>
                         {row.black.classification && (
-                          <span
-                            className="text-[10px] font-extrabold leading-none"
-                            style={{
-                              color:
-                                viewPly === row.black.ply
-                                  ? 'currentColor'
-                                  : CLASSIFICATION_META[row.black.classification].color,
-                            }}
-                            title={CLASSIFICATION_META[row.black.classification].label}
-                          >
-                            {CLASSIFICATION_META[row.black.classification].symbol}
-                          </span>
+                          <MoveBadge classification={row.black.classification} variant="inline" />
                         )}
                       </button>
                     )}
@@ -433,7 +411,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         ref={viewPly === row.white.ply ? activeMoveBtnRef : null}
                         type="button"
                         onClick={() => onSelectPly(row.white!.ply)}
-                        className={`flex items-center justify-between gap-1 px-2.5 py-2 lg:py-1 rounded text-left font-mono text-xs transition-colors cursor-pointer ${
+                        className={`flex items-center justify-between gap-1.5 px-2.5 py-2 lg:py-1 rounded text-left font-mono text-xs transition-colors cursor-pointer ${
                           viewPly === row.white.ply
                             ? 'bg-[var(--app-accent-soft)] text-[var(--app-text)] font-bold ring-1 ring-[var(--app-accent)]/50'
                             : 'text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
@@ -441,13 +419,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       >
                         <span>{row.white.san}</span>
                         {row.white.classification && (
-                          <span
-                            className="text-[10px] font-bold"
-                            style={{ color: CLASSIFICATION_META[row.white.classification].color }}
-                            title={CLASSIFICATION_META[row.white.classification].label}
-                          >
-                            {CLASSIFICATION_META[row.white.classification].symbol}
-                          </span>
+                          <MoveBadge classification={row.white.classification} variant="inline" />
                         )}
                       </button>
                     ) : (
@@ -459,7 +431,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         ref={viewPly === row.black.ply ? activeMoveBtnRef : null}
                         type="button"
                         onClick={() => onSelectPly(row.black!.ply)}
-                        className={`flex items-center justify-between gap-1 px-2.5 py-2 lg:py-1 rounded text-left font-mono text-xs transition-colors cursor-pointer ${
+                        className={`flex items-center justify-between gap-1.5 px-2.5 py-2 lg:py-1 rounded text-left font-mono text-xs transition-colors cursor-pointer ${
                           viewPly === row.black.ply
                             ? 'bg-[var(--app-accent-soft)] text-[var(--app-text)] font-bold ring-1 ring-[var(--app-accent)]/50'
                             : 'text-[var(--app-text)] hover:bg-[var(--app-surface-hover)]'
@@ -467,13 +439,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       >
                         <span>{row.black.san}</span>
                         {row.black.classification && (
-                          <span
-                            className="text-[10px] font-bold"
-                            style={{ color: CLASSIFICATION_META[row.black.classification].color }}
-                            title={CLASSIFICATION_META[row.black.classification].label}
-                          >
-                            {CLASSIFICATION_META[row.black.classification].symbol}
-                          </span>
+                          <MoveBadge classification={row.black.classification} variant="inline" />
                         )}
                       </button>
                     ) : (

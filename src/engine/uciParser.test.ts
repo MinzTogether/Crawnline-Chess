@@ -99,6 +99,24 @@ test('classifyMove differentiates book, best, inaccuracy, and blunder', () => {
   assert.equal(blunder.classification, 'blunder');
   assert.ok(blunder.accuracy < 40);
 
+  const brilliant = classifyMove({
+    evalBefore: { type: 'cp', value: 90 },
+    evalAfter: { type: 'cp', value: 260 },
+    mover: 'w',
+    playedUci: 'c4f7',
+    bestUci: 'c4f7',
+    isSacrifice: true,
+  });
+  assert.equal(brilliant.classification, 'brilliant');
+  assert.equal(brilliant.accuracy, 100);
+
   assert.equal(calculateAverageAccuracy([100, 80, 90]), 90);
   assert.equal(calculateAverageAccuracy([]), null);
+});
+
+test('parseUciInfoLine ignores noisy aspiration lowerbound and upperbound lines', () => {
+  const lower = 'info depth 14 seldepth 21 multipv 1 score cp 340 lowerbound nodes 54000 pv d1h5';
+  const upper = 'info depth 14 seldepth 21 multipv 1 score cp -220 upperbound nodes 54000 pv e7e5';
+  assert.equal(parseUciInfoLine(lower, 'w'), null);
+  assert.equal(parseUciInfoLine(upper, 'b'), null);
 });

@@ -14,7 +14,31 @@ export type AppThemeId =
   | 'desert-parchment'
   | 'sakura-daylight'
   | 'solar-amber'
-  | 'arctic-mint';
+  | 'arctic-mint'
+  | 'cobalt-carbon'
+  | 'emerald-velvet'
+  | 'rosewood-atelier'
+  | 'titanium-mist'
+  | 'monochrome-ink'
+  | 'indigo-nebula'
+  | 'copper-forge'
+  | 'matcha-noir'
+  | 'burgundy-club'
+  | 'teal-abyss'
+  | 'ivory-linen'
+  | 'matcha-studio'
+  | 'lavender-cloud'
+  | 'champagne-silk'
+  | 'porcelain-slate'
+  | 'terracotta-sun'
+  | 'chesscom-dark'
+  | 'chesscom-charcoal'
+  | 'chesscom-wood'
+  | 'chesscom-blue'
+  | 'chesscom-purple'
+  | 'chesscom-red'
+  | 'chesscom-light'
+  | 'chesscom-sky';
 
 export type AppIconId = 'crown' | 'knight' | 'shield' | 'rook' | 'queen' | 'star' | 'prism' | 'orbit';
 
@@ -41,9 +65,84 @@ export interface AppThemeMeta {
   swatchSurface: string;
   swatchAccent: string;
   isLight?: boolean;
+  isChessCom?: boolean;
 }
 
 export const APP_THEMES: AppThemeMeta[] = [
+  {
+    id: 'chesscom-dark',
+    name: 'Chess.com Dark',
+    description: 'Signature #302E2B tournament charcoal with iconic Chess.com green.',
+    swatchBg: '#302E2B',
+    swatchSurface: '#262421',
+    swatchAccent: '#81B64C',
+    isChessCom: true,
+  },
+  {
+    id: 'chesscom-charcoal',
+    name: 'Chess.com Charcoal',
+    description: 'Deep matte charcoal deck tuned for focused blitz and rapid sessions.',
+    swatchBg: '#21201D',
+    swatchSurface: '#2B2926',
+    swatchAccent: '#81B64C',
+    isChessCom: true,
+  },
+  {
+    id: 'chesscom-wood',
+    name: 'Chess.com Wood',
+    description: 'Classic warm mahogany club finish with crisp tournament green buttons.',
+    swatchBg: '#342318',
+    swatchSurface: '#422E20',
+    swatchAccent: '#81B64C',
+    isChessCom: true,
+  },
+  {
+    id: 'chesscom-blue',
+    name: 'Chess.com Blue',
+    description: 'Classic Chess.com midnight-navy palette with bright sky-slate panels.',
+    swatchBg: '#1C2838',
+    swatchSurface: '#25354A',
+    swatchAccent: '#81B64C',
+    isChessCom: true,
+  },
+  {
+    id: 'chesscom-purple',
+    name: 'Chess.com Purple',
+    description: 'Rich royal plum backdrop paired with crisp violet-lavender controls.',
+    swatchBg: '#261F36',
+    swatchSurface: '#322947',
+    swatchAccent: '#9D7CE8',
+    isChessCom: true,
+  },
+  {
+    id: 'chesscom-red',
+    name: 'Chess.com Crimson',
+    description: 'Deep tournament garnet canvas accented with vivid scarlet highlights.',
+    swatchBg: '#2C191A',
+    swatchSurface: '#3A2224',
+    swatchAccent: '#E05A5A',
+    isChessCom: true,
+  },
+  {
+    id: 'chesscom-light',
+    name: 'Chess.com Light',
+    description: 'Clean bright Chess.com daylight canvas with signature green accents.',
+    swatchBg: '#ECECEC',
+    swatchSurface: '#FFFFFF',
+    swatchAccent: '#7FA650',
+    isLight: true,
+    isChessCom: true,
+  },
+  {
+    id: 'chesscom-sky',
+    name: 'Chess.com Sky',
+    description: 'Airy Chess.com sky-blue daylight theme with crisp tournament cobalt.',
+    swatchBg: '#E3EFFA',
+    swatchSurface: '#F9FCFF',
+    swatchAccent: '#4B89C8',
+    isLight: true,
+    isChessCom: true,
+  },
   {
     id: 'dark-slate',
     name: 'Dark Slate',
@@ -126,6 +225,86 @@ export const APP_THEMES: AppThemeMeta[] = [
     swatchAccent: '#F0B43A',
   },
   {
+    id: 'cobalt-carbon',
+    name: 'Cobalt Carbon',
+    description: 'Precision matte carbon accented with electric tournament cobalt.',
+    swatchBg: '#10131A',
+    swatchSurface: '#1B202D',
+    swatchAccent: '#4D8BF5',
+  },
+  {
+    id: 'emerald-velvet',
+    name: 'Emerald Velvet',
+    description: 'Deep botanical pine slate illuminated by vivid malachite.',
+    swatchBg: '#0D1612',
+    swatchSurface: '#16251F',
+    swatchAccent: '#32C984',
+  },
+  {
+    id: 'rosewood-atelier',
+    name: 'Rosewood Atelier',
+    description: 'Smoked rosewood studio paired with warm copper-rose highlights.',
+    swatchBg: '#1A1315',
+    swatchSurface: '#2A1F22',
+    swatchAccent: '#DF7B72',
+  },
+  {
+    id: 'titanium-mist',
+    name: 'Titanium Mist',
+    description: 'Cool aerospace titanium gray finished with brushed silver-ice.',
+    swatchBg: '#15171A',
+    swatchSurface: '#22262B',
+    swatchAccent: '#8AB4D6',
+  },
+  {
+    id: 'monochrome-ink',
+    name: 'Monochrome Ink',
+    description: 'Minimalist gallery obsidian with high-contrast alabaster controls.',
+    swatchBg: '#111111',
+    swatchSurface: '#1E1E1E',
+    swatchAccent: '#E8E6E0',
+  },
+  {
+    id: 'indigo-nebula',
+    name: 'Indigo Nebula',
+    description: 'Deep astral indigo paired with crisp periwinkle highlights.',
+    swatchBg: '#111224',
+    swatchSurface: '#1D1F3B',
+    swatchAccent: '#828CFF',
+  },
+  {
+    id: 'copper-forge',
+    name: 'Copper Forge',
+    description: 'Burnished iron charcoal lit with forged bronze-copper warmth.',
+    swatchBg: '#171311',
+    swatchSurface: '#261F1C',
+    swatchAccent: '#DE834C',
+  },
+  {
+    id: 'matcha-noir',
+    name: 'Matcha Noir',
+    description: 'Roasted dark tea-room charcoal balanced with Kyoto matcha.',
+    swatchBg: '#141713',
+    swatchSurface: '#21261E',
+    swatchAccent: '#9BC462',
+  },
+  {
+    id: 'burgundy-club',
+    name: 'Burgundy Club',
+    description: 'Grandmaster lounge wine-slate trimmed with champagne gold.',
+    swatchBg: '#1B1217',
+    swatchSurface: '#2B1D24',
+    swatchAccent: '#D6A962',
+  },
+  {
+    id: 'teal-abyss',
+    name: 'Teal Abyss',
+    description: 'Deep oceanic slate-teal accented with clear aquamarine.',
+    swatchBg: '#0C171C',
+    swatchSurface: '#15262E',
+    swatchAccent: '#2EC4B6',
+  },
+  {
     id: 'nordic-frost',
     name: 'Nordic Frost',
     description: 'Crisp Scandinavian ice daylight with glacial cobalt accents.',
@@ -159,6 +338,60 @@ export const APP_THEMES: AppThemeMeta[] = [
     swatchBg: '#E5F2EE',
     swatchSurface: '#F7FCFA',
     swatchAccent: '#1F9674',
+    isLight: true,
+  },
+  {
+    id: 'ivory-linen',
+    name: 'Ivory Linen',
+    description: 'Soft architectural linen paper paired with deep forest sage.',
+    swatchBg: '#EFECE5',
+    swatchSurface: '#FCFBF8',
+    swatchAccent: '#3F7D58',
+    isLight: true,
+  },
+  {
+    id: 'matcha-studio',
+    name: 'Matcha Studio',
+    description: 'Sunlit botanical white-sage with ceremonial matcha green.',
+    swatchBg: '#EBF1E6',
+    swatchSurface: '#FAFCF8',
+    swatchAccent: '#5C8C38',
+    isLight: true,
+  },
+  {
+    id: 'lavender-cloud',
+    name: 'Lavender Cloud',
+    description: 'Airy mist porcelain accented with refined royal iris.',
+    swatchBg: '#ECEAF6',
+    swatchSurface: '#FAF9FE',
+    swatchAccent: '#6854C4',
+    isLight: true,
+  },
+  {
+    id: 'champagne-silk',
+    name: 'Champagne Silk',
+    description: 'Warm gallery alabaster with burnished bronze-gold accents.',
+    swatchBg: '#F3EEE4',
+    swatchSurface: '#FFFDF9',
+    swatchAccent: '#B37E29',
+    isLight: true,
+  },
+  {
+    id: 'porcelain-slate',
+    name: 'Porcelain Slate',
+    description: 'Crisp Swiss studio white with cool slate-blue precision ink.',
+    swatchBg: '#E9EDF2',
+    swatchSurface: '#FAFBFD',
+    swatchAccent: '#385E8C',
+    isLight: true,
+  },
+  {
+    id: 'terracotta-sun',
+    name: 'Terracotta Sun',
+    description: 'Warm Mediterranean limestone with kiln-fired sienna accents.',
+    swatchBg: '#F4E8E0',
+    swatchSurface: '#FFFBF8',
+    swatchAccent: '#C75734',
     isLight: true,
   },
 ];
