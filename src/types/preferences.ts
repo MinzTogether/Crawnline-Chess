@@ -1,8 +1,9 @@
 import type { BoardThemeId } from './chess';
 import type { AppLanguage } from '../i18n/translations';
 import type { AnimationEasingId, AnimationLevelId } from '../utils/animationConfig';
+import { resolveAppIconId, type AppIconId } from '../utils/appIconCatalog';
 
-export type { AnimationEasingId, AnimationLevelId };
+export type { AnimationEasingId, AnimationLevelId, AppIconId };
 
 export type AppThemeId =
   | 'dark-slate'
@@ -44,7 +45,6 @@ export type AppThemeId =
   | 'chesscom-light'
   | 'chesscom-sky';
 
-export type AppIconId = 'crown' | 'knight' | 'shield' | 'rook' | 'queen' | 'star' | 'prism' | 'orbit';
 
 export type PieceStyleId =
   | 'classic'
@@ -589,7 +589,7 @@ export interface AppPreferences {
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
   appTheme: 'dark-slate',
-  appIcon: 'crown',
+  appIcon: 'white-king',
   boardTheme: 'tournament',
   pieceStyle: 'classic',
   language: 'en',
@@ -663,7 +663,12 @@ export function loadPreferences(): AppPreferences {
   try {
     const raw = window.localStorage.getItem(PREFS_KEY);
     if (!raw) return DEFAULT_PREFERENCES;
-    return { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_PREFERENCES,
+      ...parsed,
+      appIcon: resolveAppIconId(parsed?.appIcon),
+    };
   } catch {
     return DEFAULT_PREFERENCES;
   }

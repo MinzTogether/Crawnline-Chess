@@ -76,12 +76,17 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
 }) => {
   const { t } = useI18n();
   const [themeFilter, setThemeFilter] = useState<'all' | 'chesscom' | 'dark' | 'light'>('all');
+  const [iconToneFilter, setIconToneFilter] = useState<'all' | 'white' | 'black'>('all');
   const [boardCategoryFilter, setBoardCategoryFilter] = useState<'All' | BoardThemeCategory>('All');
   const [previewStep, setPreviewStep] = useState<number>(0);
   const [previewCheckActive, setPreviewCheckActive] = useState<boolean>(false);
 
   const activeTheme = APP_THEMES.find((item) => item.id === preferences.appTheme) ?? APP_THEMES[0];
   const activeIcon = APP_ICONS.find((item) => item.id === preferences.appIcon) ?? APP_ICONS[0];
+  const whiteAppIcons = APP_ICONS.filter((item) => item.tone === 'white');
+  const blackAppIcons = APP_ICONS.filter((item) => item.tone === 'black');
+  const activeIconToneLabel = activeIcon.tone === 'white' ? t('iconToneWhite') : t('iconToneBlack');
+  const activeIconPieceLabel = t(activeIcon.pieceLabelKey);
   const activeBoard = BOARD_THEMES[preferences.boardTheme] ?? BOARD_THEMES.tournament;
   const activePiece = PIECE_STYLES[preferences.pieceStyle] ?? PIECE_STYLES.classic;
   const activeLangOption =
@@ -129,6 +134,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           {/* 1. App Theme */}
           <button
             type="button"
+            data-testid="settings-row-app-theme"
             onClick={() => onChangeSubPage('app-theme')}
             style={{ '--stagger': 0 } as React.CSSProperties}
             className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
@@ -159,6 +165,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           {/* 2. App Icon */}
           <button
             type="button"
+            data-testid="settings-row-app-icon"
             onClick={() => onChangeSubPage('app-icon')}
             style={{ '--stagger': 1 } as React.CSSProperties}
             className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
@@ -169,14 +176,16 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                 <div className="text-base font-bold text-[var(--app-text)]">{t('catAppIcon')}</div>
                 <div className="text-xs text-[var(--app-text-muted)] mt-0.5 truncate">
                   {t('currentLabel')}:{' '}
-                  <span className="font-semibold text-[var(--app-text)]">{activeIcon.name}</span> ·{' '}
-                  {APP_ICONS.length} {t('catAppIconUnit')}
+                  <span className="font-semibold text-[var(--app-text)]">
+                    {activeIconPieceLabel} ({activeIcon.tone === 'white' ? t('white') : t('black')})
+                  </span>{' '}
+                  · {APP_ICONS.length} {t('catAppIconUnit')}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className="hidden sm:inline text-xs font-medium text-[var(--app-text-muted)]">
-                {activeIcon.subtitle}
+                {activeIconToneLabel}
               </span>
               <ChevronRight className="w-5 h-5 text-[var(--app-text-muted)] group-hover:text-[var(--app-accent)] transition-colors" />
             </div>
@@ -535,53 +544,185 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
         </div>
       )}
 
-      {/* SUB-PAGE 2: FUTURISTIC FROSTED-JADE APP ICON */}
+      {/* SUB-PAGE 2: FROSTED TRANSLUCENT WHITE & BLACK JADE APP ICONS */}
       {subPage === 'app-icon' && (
         <div className="flex flex-col gap-5">
-          <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <AppLogoIcon iconId={preferences.appIcon} className="w-14 h-14 shrink-0" />
-              <div>
-                <div className="text-xs font-semibold text-[var(--app-accent)] flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>{t('activeAppEmblem')}</span>
+          {/* Active Emblem Preview Card */}
+          <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4 min-w-0">
+              <AppLogoIcon iconId={preferences.appIcon} className="w-16 h-16 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-[var(--app-accent)]">{t('activeAppEmblem')}</div>
+                <div
+                  data-testid="active-app-icon-title"
+                  className="text-lg font-extrabold text-[var(--app-text)] leading-tight mt-0.5 truncate"
+                >
+                  {activeIconPieceLabel} · {activeIcon.tone === 'white' ? t('white') : t('black')}
                 </div>
-                <div className="text-lg font-extrabold text-[var(--app-text)] leading-tight mt-0.5">
-                  {activeIcon.name}
-                </div>
-                <div className="text-xs text-[var(--app-text-muted)]">{activeIcon.subtitle}</div>
+                <div className="text-xs text-[var(--app-text-muted)] mt-0.5">{activeIconToneLabel}</div>
+              </div>
+            </div>
+
+            {/* Dual-Backdrop Translucency Preview (Dark & Light surface test) */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              <div
+                aria-hidden="true"
+                className="w-14 h-14 rounded-xl flex items-center justify-center border border-white/10"
+                style={{
+                  background: 'radial-gradient(circle at 30% 25%, #2D383A 0%, #14191B 100%)',
+                }}
+              >
+                <AppLogoIcon iconId={preferences.appIcon} className="w-10 h-10" />
+              </div>
+              <div
+                aria-hidden="true"
+                className="w-14 h-14 rounded-xl flex items-center justify-center border border-black/10"
+                style={{
+                  background: 'radial-gradient(circle at 30% 25%, #F6F8F8 0%, #CFD9D8 100%)',
+                }}
+              >
+                <AppLogoIcon iconId={preferences.appIcon} className="w-10 h-10" />
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-            {APP_ICONS.map((ic) => {
-              const active = preferences.appIcon === ic.id;
-              return (
-                <button
-                  key={ic.id}
-                  type="button"
-                  onClick={() => onUpdatePreferences({ appIcon: ic.id })}
-                  className={`p-4 rounded-xl border flex flex-col items-center gap-3 transition-all cursor-pointer relative anim-interactive ${
-                    active
-                      ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-                      : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
-                  }`}
-                >
-                  {active && (
-                    <span className="absolute top-2.5 right-2.5 text-[var(--app-accent)]">
-                      <Check className="w-4 h-4" />
-                    </span>
-                  )}
-                  <AppLogoIcon iconId={ic.id} className="w-16 h-16" />
-                  <div className="text-center">
-                    <div className="text-sm font-bold text-[var(--app-text)] leading-tight">{ic.name}</div>
-                    <div className="text-[11px] text-[var(--app-text-muted)] mt-0.5">{ic.subtitle}</div>
-                  </div>
-                </button>
-              );
-            })}
+          {/* Interactive Tone Filter Segmented Control */}
+          <div
+            role="group"
+            aria-label="Filter app icons by frosted jade tone"
+            className="self-start inline-flex flex-wrap items-center gap-1 p-1 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border)]"
+          >
+            {(
+              [
+                { id: 'all', label: `${t('filterAll')} (${APP_ICONS.length})` },
+                { id: 'white', label: `${t('iconSetWhiteHeading')} (${whiteAppIcons.length})` },
+                { id: 'black', label: `${t('iconSetBlackHeading')} (${blackAppIcons.length})` },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                data-testid={`icon-filter-${opt.id}`}
+                aria-pressed={iconToneFilter === opt.id}
+                onClick={() => setIconToneFilter(opt.id)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  iconToneFilter === opt.id
+                    ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)]'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
+
+          {/* Set 1: Frosted Translucent White Jade (6 pieces) */}
+          {(iconToneFilter === 'all' || iconToneFilter === 'white') && (
+            <section className="flex flex-col gap-3" data-testid="icon-set-white">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
+                  {t('iconSetWhiteHeading')} ({whiteAppIcons.length})
+                </h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {whiteAppIcons.map((ic) => {
+                  const active = preferences.appIcon === ic.id;
+                  const pieceTitle = t(ic.pieceLabelKey);
+                  return (
+                    <button
+                      key={ic.id}
+                      type="button"
+                      data-testid={`app-icon-${ic.id}`}
+                      aria-pressed={active}
+                      onClick={() => onUpdatePreferences({ appIcon: ic.id })}
+                      className={`p-3.5 rounded-xl border flex flex-col items-center gap-2.5 transition-all cursor-pointer relative anim-interactive ${
+                        active
+                          ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                          : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
+                      }`}
+                    >
+                      {active && (
+                        <span className="absolute top-2 right-2 text-[var(--app-accent)]">
+                          <Check className="w-3.5 h-3.5" />
+                        </span>
+                      )}
+                      <div
+                        className="w-full py-3 rounded-lg flex items-center justify-center border border-black/10"
+                        style={{
+                          background:
+                            'radial-gradient(circle at 28% 24%, rgba(129,182,76,0.22) 0%, rgba(28,36,39,0.82) 52%, rgba(14,19,22,0.92) 100%)',
+                        }}
+                      >
+                        <AppLogoIcon iconId={ic.id} className="w-14 h-14" />
+                      </div>
+                      <div className="text-center min-w-0 w-full">
+                        <div className="text-xs font-bold text-[var(--app-text)] leading-tight truncate">
+                          {pieceTitle}
+                        </div>
+                        <div className="text-[10px] text-[var(--app-text-muted)] mt-0.5 truncate">
+                          {t('white')}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Set 2: Frosted Translucent Black Jade (6 pieces) */}
+          {(iconToneFilter === 'all' || iconToneFilter === 'black') && (
+            <section className="flex flex-col gap-3" data-testid="icon-set-black">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
+                  {t('iconSetBlackHeading')} ({blackAppIcons.length})
+                </h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {blackAppIcons.map((ic) => {
+                  const active = preferences.appIcon === ic.id;
+                  const pieceTitle = t(ic.pieceLabelKey);
+                  return (
+                    <button
+                      key={ic.id}
+                      type="button"
+                      data-testid={`app-icon-${ic.id}`}
+                      aria-pressed={active}
+                      onClick={() => onUpdatePreferences({ appIcon: ic.id })}
+                      className={`p-3.5 rounded-xl border flex flex-col items-center gap-2.5 transition-all cursor-pointer relative anim-interactive ${
+                        active
+                          ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                          : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
+                      }`}
+                    >
+                      {active && (
+                        <span className="absolute top-2 right-2 text-[var(--app-accent)]">
+                          <Check className="w-3.5 h-3.5" />
+                        </span>
+                      )}
+                      <div
+                        className="w-full py-3 rounded-lg flex items-center justify-center border border-white/10"
+                        style={{
+                          background:
+                            'radial-gradient(circle at 30% 24%, rgba(226,238,236,0.42) 0%, rgba(164,182,180,0.22) 56%, rgba(102,118,118,0.16) 100%)',
+                        }}
+                      >
+                        <AppLogoIcon iconId={ic.id} className="w-14 h-14" />
+                      </div>
+                      <div className="text-center min-w-0 w-full">
+                        <div className="text-xs font-bold text-[var(--app-text)] leading-tight truncate">
+                          {pieceTitle}
+                        </div>
+                        <div className="text-[10px] text-[var(--app-text-muted)] mt-0.5 truncate">
+                          {t('black')}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       )}
 
