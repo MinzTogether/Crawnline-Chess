@@ -35,14 +35,25 @@ import {
   type CachedEvalEntry,
 } from './engine/evalStabilizer';
 import { calculateAverageAccuracy, classifyMove } from './engine/uciParser';
-import { buildPgn, evaluateGameTermination, getMaterialSummary, parsePgnOrFen } from './game/chessLogic';
-import { generateRandomChessFen, generateStandardRandomFen } from './game/customPosition';
 import {
-  applyChess960Move,
-  createChess960Position,
-  toShredderFen,
-  type Chess960CastlingRights,
-} from './game/chess960';
+  applyRuleMove,
+  buildChessWithHistory,
+  buildPgn,
+  evaluateGameTermination,
+  getMaterialSummary,
+  parsePgnOrFen,
+  stripCastlingRights,
+} from './game/chessLogic';
+import {
+  commitMoveClock,
+  createClockState,
+  getClockRemaining,
+  pauseClockState,
+  resumeClockState,
+  type ClockState,
+} from './game/clock';
+import { generateRandomChessFen, generateStandardRandomFen } from './game/customPosition';
+import { createChess960Position } from './game/chess960';
 import { detectOpening } from './game/openings';
 import { playChessSound } from './utils/sound';
 import { resolveAnimationTokens } from './utils/animationConfig';
@@ -124,8 +135,6 @@ export default function App() {
   const [activeVariant, setActiveVariant] = useState<MatchVariant>('standard');
   const [activeRandomStyle, setActiveRandomStyle] = useState<RandomChessStyle>('all');
   const [activeChess960Id, setActiveChess960Id] = useState<number | null>(null);
-  const [initialChess960Rights, setInitialChess960Rights] = useState<Chess960CastlingRights | null>(null);
-  const [initialEngineFen, setInitialEngineFen] = useState<string>(INITIAL_FEN);
   const [positionLabel, setPositionLabel] = useState<string | null>(null);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
 
@@ -138,6 +147,9 @@ export default function App() {
   const [whiteClock, setWhiteClock] = useState<number | null>(600);
   const [blackClock, setBlackClock] = useState<number | null>(600);
   const [incrementSec, setIncrementSec] = useState<number>(0);
+  const clockRef = useRef<ClockState | null>(
+    getAutostartFlag() ? createClockState(600, 'w', Date.now()) : null
+  );
 
   // Arena UI State
   const [rightTab, setRightTab] = useState<RightPanelTab>('moves');
@@ -232,48 +244,35 @@ export default function App() {
     [matchSettings.stockfishLevelId]
   );
 
-  // Derived board positions
+  // Derived board positions & rules
+  const allowCastling = activeVariant === 'standard';
+  const isChess960 = activeVariant === 'chess960';
   const latestFen = moves.length > 0 ? moves[moves.length - 1].fenAfter : initialFen;
   const viewedFen = viewPly === 0 ? initialFen : moves[viewPly - 1]?.fenAfter ?? latestFen;
   const isViewingLatest = viewPly === moves.length;
 
-  const isChess960 = activeVariant === 'chess960' && initialChess960Rights !== null;
-  const viewedChess960Rights = useMemo<Chess960CastlingRights | null>(() => {
-    if (!isChess960 || !initialChess960Rights) return null;
-    if (viewPly === 0) return initialChess960Rights;
-    return moves[viewPly - 1]?.castlingRights960 ?? initialChess960Rights;
-  }, [isChess960, initialChess960Rights, viewPly, moves]);
-
-  const latestChess960Rights = useMemo<Chess960CastlingRights | null>(() => {
-    if (!isChess960 || !initialChess960Rights) return null;
-    if (moves.length === 0) return initialChess960Rights;
-    return moves[moves.length - 1]?.castlingRights960 ?? initialChess960Rights;
-  }, [isChess960, initialChess960Rights, moves]);
-
-  const viewedEngineFen = useMemo(() => {
-    if (!isChess960 || !viewedChess960Rights) return viewedFen;
-    if (viewPly === 0) return initialEngineFen;
-    return moves[viewPly - 1]?.engineFenAfter ?? toShredderFen(viewedFen, viewedChess960Rights);
-  }, [isChess960, viewedChess960Rights, viewedFen, viewPly, initialEngineFen, moves]);
-
-  const latestEngineFen = useMemo(() => {
-    if (!isChess960 || !latestChess960Rights) return latestFen;
-    if (moves.length === 0) return initialEngineFen;
-    return moves[moves.length - 1]?.engineFenAfter ?? toShredderFen(latestFen, latestChess960Rights);
-  }, [isChess960, latestChess960Rights, latestFen, moves, initialEngineFen]);
-
-  const viewedChess = useMemo(() => new Chess(viewedFen), [viewedFen]);
-  const latestChess = useMemo(() => new Chess(latestFen), [latestFen]);
+  const viewedChess = useMemo(
+    () => buildChessWithHistory(initialFen, moves.slice(0, viewPly), allowCastling),
+    [initialFen, moves, viewPly, allowCastling]
+  );
+  const latestChess = useMemo(
+    () => buildChessWithHistory(initialFen, moves, allowCastling),
+    [initialFen, moves, allowCastling]
+  );
 
   const termination = useMemo(
     () =>
       evaluateGameTermination({
         fen: latestFen,
+        initialFen,
+        moves,
+        chess: latestChess,
+        allowCastling,
         timeoutLoser,
         resignedBy,
         agreedDraw,
       }),
-    [latestFen, timeoutLoser, resignedBy, agreedDraw]
+    [latestFen, initialFen, moves, latestChess, allowCastling, timeoutLoser, resignedBy, agreedDraw]
   );
 
   const opening = useMemo(() => {
@@ -356,9 +355,9 @@ export default function App() {
         blackName,
         result: termination.resultString,
         variant: isChess960 ? 'Chess960' : undefined,
-        pgnInitialFen: isChess960 ? initialEngineFen : initialFen,
+        pgnInitialFen: initialFen,
       }),
-    [initialFen, initialEngineFen, isChess960, moves, whiteName, blackName, termination.resultString]
+    [initialFen, isChess960, moves, whiteName, blackName, termination.resultString]
   );
 
   // Start / Restart a match
@@ -374,16 +373,13 @@ export default function App() {
       const newMatchId = `match-${Date.now()}`;
 
       let resolvedFen = INITIAL_FEN;
-      let resolvedEngineFen = INITIAL_FEN;
       let resolvedLabel: string | null = null;
       let resolvedRandomStyle: RandomChessStyle = cfg.randomStyle ?? 'all';
       let resolved960Id: number | null = null;
-      let resolved960Rights: Chess960CastlingRights | null = null;
 
       if (variant === 'random') {
         resolvedFen =
           resolvedRandomStyle === 'standard' ? generateStandardRandomFen() : generateRandomChessFen();
-        resolvedEngineFen = resolvedFen;
         const styleName =
           resolvedRandomStyle === 'standard'
             ? translate(preferences.language, 'randomStyleStandardTitle')
@@ -392,20 +388,21 @@ export default function App() {
       } else if (variant === 'chess960') {
         const pos960 = createChess960Position(cfg.chess960Id ?? undefined);
         resolvedFen = pos960.fen;
-        resolvedEngineFen = pos960.shredderFen;
         resolved960Id = pos960.id;
-        resolved960Rights = pos960.castlingRights;
         resolvedLabel = `Chess960 #${pos960.id}`;
       } else if (variant === 'custom' && cfg.customFen) {
         try {
-          const check = new Chess(cfg.customFen);
+          const check = new Chess(stripCastlingRights(cfg.customFen, 'both'));
           resolvedFen = check.fen();
-          resolvedEngineFen = resolvedFen;
           resolvedLabel = translate(preferences.language, 'modeCustomTitle');
         } catch {
-          resolvedFen = INITIAL_FEN;
-          resolvedEngineFen = INITIAL_FEN;
+          resolvedFen = stripCastlingRights(INITIAL_FEN, 'both');
         }
+      }
+
+      // Castling is only allowed in Classic ('standard') mode
+      if (variant !== 'standard') {
+        resolvedFen = stripCastlingRights(resolvedFen, 'both');
       }
 
       opponentRef.current?.cancel();
@@ -415,8 +412,6 @@ export default function App() {
       setActiveVariant(variant);
       setActiveRandomStyle(resolvedRandomStyle);
       setActiveChess960Id(resolved960Id);
-      setInitialChess960Rights(resolved960Rights);
-      setInitialEngineFen(resolvedEngineFen);
       setHumanColor(chosenSide);
       setOrientation(chosenSide);
       setInitialFen(resolvedFen);
@@ -441,11 +436,15 @@ export default function App() {
       };
       setShowNewMatchModal(false);
 
+      const initialTurn = new Chess(resolvedFen).turn();
       if (cfg.mode === 'analysis' || tc.initialSeconds === 0) {
+        clockRef.current = null;
         setWhiteClock(null);
         setBlackClock(null);
         setIncrementSec(0);
       } else {
+        // Start timestamp-based clock immediately upon entering 'playing'
+        clockRef.current = createClockState(tc.initialSeconds, initialTurn, Date.now());
         setWhiteClock(tc.initialSeconds);
         setBlackClock(tc.initialSeconds);
         setIncrementSec(tc.incrementSeconds);
@@ -470,98 +469,54 @@ export default function App() {
 
       const baseMoves = isViewingLatest ? moves : moves.slice(0, viewPly);
       const baseFen = baseMoves.length > 0 ? baseMoves[baseMoves.length - 1].fenAfter : initialFen;
-      const moveNum = parseInt(baseFen.split(' ')[5] || '1', 10) || Math.floor(baseMoves.length / 2) + 1;
 
       const prevAnalysis = latestAnalysisRef.current;
       const bestBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.bestMoveUci ?? undefined : undefined;
       const evalBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.lines[0]?.score : undefined;
 
-      let newRecord: MoveRecord;
-      let movedColor: Color;
-      let soundKind: 'gameover' | 'check' | 'promote' | 'castle' | 'capture' | 'move';
+      const applied = applyRuleMove({
+        initialFen,
+        moves: baseMoves,
+        from,
+        to,
+        promotion,
+        allowCastling,
+      });
 
-      if (isChess960 && initialChess960Rights) {
-        const baseRights =
-          baseMoves.length > 0
-            ? baseMoves[baseMoves.length - 1].castlingRights960 ?? initialChess960Rights
-            : initialChess960Rights;
-        const res = applyChess960Move(baseFen, baseRights, from, to, promotion);
-        if (!res) {
-          playChessSound('illegal', preferences.muted);
-          return false;
-        }
-        movedColor = res.color;
-        newRecord = {
-          ply: baseMoves.length + 1,
-          moveNumber: moveNum,
-          color: res.color,
-          san: res.san,
-          uci: res.uci,
-          from: res.from,
-          to: res.to,
-          piece: res.piece,
-          captured: res.captured,
-          promotion: res.promotion,
-          fenBefore: baseFen,
-          fenAfter: res.fenAfter,
-          engineFenAfter: res.shredderFenAfter,
-          castlingRights960: res.castlingRightsAfter,
-          bestMoveBefore: bestBefore,
-        };
-        soundKind =
-          res.isCheckmate || res.isDraw
-            ? 'gameover'
-            : res.isCheck
-              ? 'check'
-              : res.isPromotion
-                ? 'promote'
-                : res.isCastle
-                  ? 'castle'
-                  : res.isCapture
-                    ? 'capture'
-                    : 'move';
-      } else {
-        const game = new Chess(baseFen);
-        let played;
-        try {
-          played = game.move({ from, to, promotion: promotion ?? 'q' });
-        } catch {
-          playChessSound('illegal', preferences.muted);
-          return false;
-        }
-        if (!played) {
-          playChessSound('illegal', preferences.muted);
-          return false;
-        }
-        movedColor = played.color;
-        newRecord = {
-          ply: baseMoves.length + 1,
-          moveNumber: moveNum,
-          color: played.color,
-          san: played.san,
-          uci: `${played.from}${played.to}${played.promotion ?? ''}`,
-          from: played.from,
-          to: played.to,
-          piece: played.piece,
-          captured: played.captured,
-          promotion: played.promotion,
-          fenBefore: baseFen,
-          fenAfter: game.fen(),
-          bestMoveBefore: bestBefore,
-        };
-        soundKind =
-          game.isCheckmate() || game.isDraw()
-            ? 'gameover'
-            : game.inCheck()
-              ? 'check'
-              : played.flags.includes('p')
-                ? 'promote'
-                : played.flags.includes('k') || played.flags.includes('q')
-                  ? 'castle'
-                  : played.captured || played.flags.includes('e')
-                    ? 'capture'
-                    : 'move';
+      if (!applied) {
+        playChessSound('illegal', preferences.muted);
+        return false;
       }
+
+      const movedColor = applied.color;
+      const newRecord: MoveRecord = {
+        ply: baseMoves.length + 1,
+        moveNumber: applied.moveNumber,
+        color: applied.color,
+        san: applied.san,
+        uci: applied.uci,
+        from: applied.from,
+        to: applied.to,
+        piece: applied.piece,
+        captured: applied.captured,
+        promotion: applied.promotion,
+        fenBefore: applied.fenBefore,
+        fenAfter: applied.fenAfter,
+        bestMoveBefore: bestBefore,
+      };
+
+      const soundKind: 'gameover' | 'check' | 'promote' | 'castle' | 'capture' | 'move' =
+        applied.isCheckmate || applied.isDraw
+          ? 'gameover'
+          : applied.isCheck
+            ? 'check'
+            : applied.isPromotion
+              ? 'promote'
+              : applied.isCastle
+                ? 'castle'
+                : applied.isCapture
+                  ? 'capture'
+                  : 'move';
 
       const nextMoves = [...baseMoves, newRecord];
       if (evalBefore && nextMoves.length >= 2 && !nextMoves[nextMoves.length - 2].evalAfter) {
@@ -575,11 +530,25 @@ export default function App() {
       setViewPly(nextMoves.length);
       setHintArrow(null);
 
-      if (incrementSec > 0 && activeMode !== 'analysis') {
-        if (movedColor === 'w') {
-          setWhiteClock((c) => (c !== null ? c + incrementSec : null));
-        } else {
-          setBlackClock((c) => (c !== null ? c + incrementSec : null));
+      // Commit elapsed timestamp on mover's clock, add increment, and start next turn timestamp
+      if (activeMode !== 'analysis' && clockRef.current !== null) {
+        const nextTurn: Color = movedColor === 'w' ? 'b' : 'w';
+        const gameEnded = applied.isCheckmate || applied.isDraw;
+        const { nextState, expiredColor } = commitMoveClock(
+          clockRef.current,
+          movedColor,
+          nextTurn,
+          incrementSec,
+          Date.now(),
+          gameEnded
+        );
+        clockRef.current = nextState;
+        setWhiteClock(nextState.w);
+        setBlackClock(nextState.b);
+        if (expiredColor) {
+          setTimeoutLoser(expiredColor);
+          playChessSound('gameover', preferences.muted);
+          return true;
         }
       }
 
@@ -589,8 +558,7 @@ export default function App() {
     [
       appState,
       activeMode,
-      isChess960,
-      initialChess960Rights,
+      allowCastling,
       termination.isOver,
       isViewingLatest,
       moves,
@@ -691,9 +659,8 @@ export default function App() {
         {
           depth: preferences.analysisDepth,
           multiPv: preferences.multiPv,
-          chess960: isChess960,
-          engineFen: viewedEngineFen,
-          chess960Rights: viewedChess960Rights ?? undefined,
+          chess960: false,
+          engineFen: viewedFen,
         },
         (snapshot) => {
           if (cancelled) return;
@@ -742,10 +709,7 @@ export default function App() {
     engineEnabled,
     isReviewing,
     viewedFen,
-    viewedEngineFen,
     viewedChess,
-    isChess960,
-    viewedChess960Rights,
     activeVariant,
     preferences.analysisDepth,
     preferences.multiPv,
@@ -768,7 +732,7 @@ export default function App() {
     const startedAt = performance.now();
 
     opponent
-      .computeMove(latestEngineFen, activeLevel, isChess960)
+      .computeMove(latestFen, activeLevel, false)
       .then((uciMove) => {
         if (cancelled || !uciMove || uciMove.length < 4) return;
         const elapsed = performance.now() - startedAt;
@@ -799,57 +763,60 @@ export default function App() {
     isViewingLatest,
     humanColor,
     latestChess,
-    latestEngineFen,
-    isChess960,
+    latestFen,
     activeLevel,
     ensureOpponent,
     applyMove,
   ]);
 
-  // Active Match Clocks Ticker
+  // Active Match Timestamp-Based Clock (starts immediately upon entering 'playing')
+  const hasTimedClock = whiteClock !== null && blackClock !== null;
+  const shouldClockRun =
+    appState === 'playing' && activeMode !== 'analysis' && !termination.isOver && hasTimedClock;
+  const activeClockTurn = latestChess.turn();
+
   useEffect(() => {
-    if (appState !== 'playing') return;
-    if (activeMode === 'analysis') return;
-    if (termination.isOver) return;
-    if (whiteClock === null || blackClock === null) return;
-    if (moves.length === 0) return;
-
-    const activeTurn = latestChess.turn();
-    const timer = window.setInterval(() => {
-      if (activeTurn === 'w') {
-        setWhiteClock((prev) => {
-          if (prev === null) return null;
-          const next = Math.max(0, prev - 0.1);
-          if (next <= 0) {
-            setTimeoutLoser('w');
-            playChessSound('gameover', preferences.muted);
-          }
-          return next;
-        });
-      } else {
-        setBlackClock((prev) => {
-          if (prev === null) return null;
-          const next = Math.max(0, prev - 0.1);
-          if (next <= 0) {
-            setTimeoutLoser('b');
-            playChessSound('gameover', preferences.muted);
-          }
-          return next;
-        });
+    if (!shouldClockRun) {
+      if (clockRef.current && clockRef.current.turnStartedAtMs !== null) {
+        const paused = pauseClockState(clockRef.current, Date.now());
+        clockRef.current = paused;
+        setWhiteClock(paused.w);
+        setBlackClock(paused.b);
       }
-    }, 100);
+      return;
+    }
 
+    const now = Date.now();
+    if (!clockRef.current) {
+      clockRef.current = {
+        w: whiteClock ?? 600,
+        b: blackClock ?? 600,
+        activeTurn: activeClockTurn,
+        turnStartedAtMs: now,
+      };
+    } else if (
+      clockRef.current.turnStartedAtMs === null ||
+      clockRef.current.activeTurn !== activeClockTurn
+    ) {
+      clockRef.current = resumeClockState(clockRef.current, activeClockTurn, now);
+    }
+
+    const syncFromTimestamp = () => {
+      const snap = clockRef.current;
+      if (!snap) return;
+      const rem = getClockRemaining(snap, Date.now());
+      setWhiteClock(rem.w);
+      setBlackClock(rem.b);
+      if (rem.expiredColor) {
+        clockRef.current = pauseClockState(snap, Date.now());
+        setTimeoutLoser(rem.expiredColor);
+        playChessSound('gameover', preferences.muted);
+      }
+    };
+
+    const timer = window.setInterval(syncFromTimestamp, 100);
     return () => window.clearInterval(timer);
-  }, [
-    appState,
-    activeMode,
-    termination.isOver,
-    whiteClock === null,
-    blackClock === null,
-    moves.length,
-    latestChess,
-    preferences.muted,
-  ]);
+  }, [shouldClockRun, activeClockTurn, preferences.muted]);
 
   // Full Match Rating / Game Review pass across explicit or current moves
   const runMatchRatingPass = useCallback(
@@ -864,17 +831,15 @@ export default function App() {
 
       try {
         let prevResult = await analyzer.evaluateOnce(targetInitialFen, 10, {
-          chess960: isChess960,
-          engineFen: isChess960 ? initialEngineFen : targetInitialFen,
-          chess960Rights: initialChess960Rights ?? undefined,
+          chess960: false,
+          engineFen: targetInitialFen,
         });
 
         for (let i = 0; i < reviewed.length; i++) {
           const m = reviewed[i];
           const afterResult = await analyzer.evaluateOnce(m.fenAfter, 10, {
-            chess960: isChess960,
-            engineFen: isChess960 ? m.engineFenAfter ?? m.fenAfter : m.fenAfter,
-            chess960Rights: m.castlingRights960,
+            chess960: false,
+            engineFen: m.fenAfter,
           });
           const isBook =
             activeVariant === 'standard' &&
@@ -930,7 +895,7 @@ export default function App() {
         setIsReviewing(false);
       }
     },
-    [ensureAnalyzer, isChess960, initialEngineFen, initialChess960Rights, activeVariant]
+    [ensureAnalyzer, activeVariant]
   );
 
   const handleRunGameReview = useCallback(() => {
@@ -966,10 +931,17 @@ export default function App() {
     const nextMoves = moves.slice(0, Math.max(0, moves.length - popCount));
     setMoves(nextMoves);
     setViewPly(nextMoves.length);
+    if (clockRef.current && activeMode !== 'analysis') {
+      const nextFen = nextMoves.length > 0 ? nextMoves[nextMoves.length - 1].fenAfter : initialFen;
+      const nextTurn = new Chess(nextFen).turn();
+      clockRef.current = resumeClockState(clockRef.current, nextTurn, Date.now());
+      setWhiteClock(clockRef.current.w);
+      setBlackClock(clockRef.current.b);
+    }
     if (appState === 'gameover') {
       setAppState('playing');
     }
-  }, [moves, activeMode, latestChess, humanColor, appState]);
+  }, [moves, activeMode, latestChess, humanColor, appState, initialFen]);
 
   const handleImportPgnOrFen = useCallback(
     (text: string, label?: string, autoRate = false): { ok: boolean; error?: string } => {
@@ -981,8 +953,6 @@ export default function App() {
       setActiveMode('analysis');
       setActiveVariant('standard');
       setActiveChess960Id(null);
-      setInitialChess960Rights(null);
-      setInitialEngineFen(parsed.initialFen);
       setInitialFen(parsed.initialFen);
       setPositionLabel(label ?? (parsed.initialFen !== INITIAL_FEN ? 'Custom FEN Position' : 'Imported Match'));
       setActiveMatchId(null);
@@ -991,6 +961,7 @@ export default function App() {
       setResignedBy(null);
       setTimeoutLoser(null);
       setAgreedDraw(false);
+      clockRef.current = null;
       setWhiteClock(null);
       setBlackClock(null);
       setHintArrow(null);
@@ -1190,9 +1161,11 @@ export default function App() {
     !isBotThinking;
 
   const allowedBoardTurn: Color | 'both' = activeMode === 'stockfish' ? humanColor : 'both';
+  const showMoveEvaluationBadges = activeMode === 'analysis';
 
   const returnToHub = (targetSection: HubSection) => {
     opponentRef.current?.cancel();
+    clockRef.current = null;
     setHubSection(targetSection);
     setAppState('title');
   };
@@ -1367,6 +1340,7 @@ export default function App() {
             moves={moves}
             viewPly={viewPly}
             opening={opening}
+            showMoveBadges={showMoveEvaluationBadges}
             onSelectPly={(ply) => {
               setViewPly(ply);
               setHintArrow(null);
@@ -1407,7 +1381,7 @@ export default function App() {
                 ? {
                     from: viewedLastMove.from,
                     to: viewedLastMove.to,
-                    classification: viewedLastMove.classification,
+                    classification: showMoveEvaluationBadges ? viewedLastMove.classification : undefined,
                   }
                 : null
             }
@@ -1418,7 +1392,8 @@ export default function App() {
             evalScore={activeEvalScore}
             evalDepth={stabilizedEval.depth}
             evalStabilizing={stabilizedEval.isStabilizing}
-            chess960Rights={viewedChess960Rights}
+            allowCastling={allowCastling}
+            chess960Rights={null}
             onMove={applyMove}
           />
 
@@ -1477,13 +1452,14 @@ export default function App() {
           )}
         </section>
 
-          <RightPanel
+        <RightPanel
           activeTab={rightTab}
           onTabChange={setRightTab}
           mode={activeMode}
+          showMoveBadges={showMoveEvaluationBadges}
           moves={moves}
           viewPly={viewPly}
-          currentFen={viewedEngineFen}
+          currentFen={viewedFen}
           opening={opening}
           positionLabel={positionLabel}
           whiteName={whiteName}
@@ -1555,6 +1531,9 @@ export default function App() {
           finalFen={latestFen}
           onAnalysis={() => {
             setGameOverDismissed(true);
+            clockRef.current = null;
+            setWhiteClock(null);
+            setBlackClock(null);
             setActiveMode('analysis');
             setAppState('playing');
             setShowBestArrow(true);

@@ -8,6 +8,7 @@ interface MobileMoveBarProps {
   moves: MoveRecord[];
   viewPly: number;
   opening: OpeningInfo | null;
+  showMoveBadges?: boolean;
   onSelectPly: (ply: number) => void;
   onJumpToMoveList?: () => void;
 }
@@ -20,6 +21,7 @@ export const MobileMoveBar: React.FC<MobileMoveBarProps> = ({
   moves,
   viewPly,
   opening,
+  showMoveBadges = false,
   onSelectPly,
   onJumpToMoveList,
 }) => {
@@ -95,7 +97,9 @@ export const MobileMoveBar: React.FC<MobileMoveBarProps> = ({
                     }`}
                   >
                     <span>{m.san}</span>
-                    {m.classification && <MoveBadge classification={m.classification} variant="inline" />}
+                    {showMoveBadges && m.classification && (
+                      <MoveBadge classification={m.classification} variant="inline" />
+                    )}
                   </button>
                 </React.Fragment>
               );

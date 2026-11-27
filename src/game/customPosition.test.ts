@@ -34,10 +34,17 @@ test('swapOrMoveSquare swaps two occupied squares and moves to empty squares cle
   assert.deepEqual(moved.f3, { type: 'n', color: 'w' });
 });
 
-test('validateCustomPosition catches missing kings, edge-rank pawns, and illegal check', () => {
+test('validateCustomPosition catches missing kings, edge-rank pawns, illegal check, and disables castling', () => {
   const kingsOnly = createKingsOnlyBoard();
   const validMinimal = validateCustomPosition(kingsOnly, 'w');
   assert.equal(validMinimal.valid, true);
+
+  const stdBoard = fenToBoardMap(STANDARD_START_FEN);
+  const validStdCustom = validateCustomPosition(stdBoard, 'w');
+  assert.equal(validStdCustom.valid, true);
+  if (validStdCustom.valid) {
+    assert.equal(validStdCustom.fen.split(' ')[2], '-');
+  }
 
   const noWhiteKing = setSquarePiece(kingsOnly, 'e1', null);
   const resNoW = validateCustomPosition(noWhiteKing, 'w');

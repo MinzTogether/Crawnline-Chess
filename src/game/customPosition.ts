@@ -201,7 +201,8 @@ export function validateCustomPosition(board: BoardMap, turn: Color = 'w'): Cust
     return { valid: false, errorKey: 'customErrOpponentCheck' };
   }
 
-  const fen = boardMapToFen(board, turn, true);
+  // Castling is disabled outside Classic mode
+  const fen = boardMapToFen(board, turn, false);
   try {
     const chess = new Chess(fen);
     const opponent: Color = turn === 'w' ? 'b' : 'w';

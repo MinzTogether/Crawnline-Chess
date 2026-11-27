@@ -139,10 +139,228 @@ export function formatPvSanWithNumbers(fen: string, sanMoves: string[]): string 
 }
 
 /**
- * Evaluates full game termination status including board rules, clock flag, resignation, and draw agreement.
+ * Strips castling rights from a FEN string for White, Black, or both sides.
+ */
+export function stripCastlingRights(fen: string, colors: Color | 'both' = 'both'): string {
+  const parts = fen.trim().split(/\s+/);
+  if (parts.length < 4) return fen;
+
+  if (colors === 'both') {
+    parts[2] = '-';
+    return parts.join(' ');
+  }
+
+  const current = parts[2] === '-' ? '' : parts[2];
+  const filtered =
+    colors === 'w' ? current.replace(/[A-Z]/g, '') : current.replace(/[a-z]/g, '');
+  parts[2] = filtered || '-';
+  return parts.join(' ');
+}
+
+/**
+ * Enforces castling rules on a FEN:
+ * - Outside Classic mode (`allowCastling = false`), all castling rights are stripped.
+ * - In Classic mode, if a side's king has ever moved, that side's castling rights are permanently cut
+ *   so returning the king to e1/e8 can never restore castling.
+ */
+export function sanitizeFenForRules(
+  fen: string,
+  options: {
+    allowCastling: boolean;
+    whiteKingMoved?: boolean;
+    blackKingMoved?: boolean;
+  }
+): string {
+  if (!options.allowCastling) {
+    return stripCastlingRights(fen, 'both');
+  }
+  let sanitized = fen;
+  if (options.whiteKingMoved) {
+    sanitized = stripCastlingRights(sanitized, 'w');
+  }
+  if (options.blackKingMoved) {
+    sanitized = stripCastlingRights(sanitized, 'b');
+  }
+  return sanitized;
+}
+
+/**
+ * Rebuilds a Chess instance from `initialFen` and replayed `moves` so full move history
+ * (needed for threefold repetition and draw detection) is preserved.
+ */
+export function buildChessWithHistory(
+  initialFen: string,
+  moves: MoveRecord[],
+  allowCastling = true
+): Chess {
+  const startFen = allowCastling ? initialFen : stripCastlingRights(initialFen, 'both');
+  const chess = new Chess(startFen);
+
+  for (const m of moves) {
+    try {
+      const applied = chess.move({
+        from: m.from,
+        to: m.to,
+        promotion: m.promotion,
+      });
+      if (!applied) {
+        return new Chess(moves[moves.length - 1]?.fenAfter ?? startFen);
+      }
+    } catch {
+      return new Chess(moves[moves.length - 1]?.fenAfter ?? startFen);
+    }
+  }
+
+  return chess;
+}
+
+function getRepetitionKey(fen: string): string {
+  const parts = fen.trim().split(/\s+/);
+  return parts.slice(0, 4).join(' ');
+}
+
+function hasThreefoldRepetitionInHistory(initialFen: string, moves: MoveRecord[]): boolean {
+  const counts = new Map<string, number>();
+  const bump = (fen: string): number => {
+    const key = getRepetitionKey(fen);
+    const next = (counts.get(key) ?? 0) + 1;
+    counts.set(key, next);
+    return next;
+  };
+
+  bump(initialFen);
+  for (const m of moves) {
+    if (bump(m.fenAfter) >= 3) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export interface AppliedRuleMove {
+  fenBefore: string;
+  fenAfter: string;
+  moveNumber: number;
+  color: Color;
+  san: string;
+  uci: string;
+  from: Square;
+  to: Square;
+  piece: PieceSymbol;
+  captured?: PieceSymbol;
+  promotion?: PieceSymbol;
+  isCastle: boolean;
+  isCapture: boolean;
+  isPromotion: boolean;
+  isCheck: boolean;
+  isCheckmate: boolean;
+  isDraw: boolean;
+}
+
+/**
+ * Applies a single legal move while enforcing:
+ * - Full move history awareness for draw/threefold-repetition status
+ * - Complete revocation of castling rights when a king moves (even if it later returns to e1/e8)
+ * - No castling allowed outside Classic mode (`allowCastling = false`)
+ */
+export function applyRuleMove(params: {
+  initialFen: string;
+  moves: MoveRecord[];
+  from: Square;
+  to: Square;
+  promotion?: PieceSymbol;
+  allowCastling: boolean;
+}): AppliedRuleMove | null {
+  const { initialFen, moves, from, to, promotion, allowCastling } = params;
+  const whiteKingMoved = moves.some((m) => m.color === 'w' && m.piece === 'k');
+  const blackKingMoved = moves.some((m) => m.color === 'b' && m.piece === 'k');
+
+  const rawBaseFen = moves.length > 0 ? moves[moves.length - 1].fenAfter : initialFen;
+  const sanitizedBaseFen = sanitizeFenForRules(rawBaseFen, {
+    allowCastling,
+    whiteKingMoved,
+    blackKingMoved,
+  });
+  const moveNumber =
+    parseInt(sanitizedBaseFen.split(' ')[5] || '1', 10) || Math.floor(moves.length / 2) + 1;
+
+  const game = new Chess(sanitizedBaseFen);
+  let played;
+  try {
+    played = game.move({ from, to, promotion: promotion ?? 'q' });
+  } catch {
+    return null;
+  }
+  if (!played) return null;
+
+  // Reject castling if somehow attempted outside Classic mode
+  const isCastle = played.flags.includes('k') || played.flags.includes('q');
+  if (!allowCastling && isCastle) {
+    return null;
+  }
+
+  const nextWhiteKingMoved = whiteKingMoved || (played.color === 'w' && played.piece === 'k');
+  const nextBlackKingMoved = blackKingMoved || (played.color === 'b' && played.piece === 'k');
+  const fenAfter = sanitizeFenForRules(game.fen(), {
+    allowCastling,
+    whiteKingMoved: nextWhiteKingMoved,
+    blackKingMoved: nextBlackKingMoved,
+  });
+
+  const nextMovesForCheck: MoveRecord[] = [
+    ...moves,
+    {
+      ply: moves.length + 1,
+      moveNumber,
+      color: played.color,
+      san: played.san,
+      uci: `${played.from}${played.to}${played.promotion ?? ''}`,
+      from: played.from,
+      to: played.to,
+      piece: played.piece,
+      captured: played.captured,
+      promotion: played.promotion,
+      fenBefore: sanitizedBaseFen,
+      fenAfter,
+    },
+  ];
+
+  const isRepetitionDraw = hasThreefoldRepetitionInHistory(
+    allowCastling ? initialFen : stripCastlingRights(initialFen, 'both'),
+    nextMovesForCheck
+  );
+
+  return {
+    fenBefore: sanitizedBaseFen,
+    fenAfter,
+    moveNumber,
+    color: played.color,
+    san: played.san,
+    uci: `${played.from}${played.to}${played.promotion ?? ''}`,
+    from: played.from,
+    to: played.to,
+    piece: played.piece,
+    captured: played.captured,
+    promotion: played.promotion,
+    isCastle,
+    isCapture: Boolean(played.captured) || played.flags.includes('e'),
+    isPromotion: played.flags.includes('p'),
+    isCheck: game.inCheck(),
+    isCheckmate: game.isCheckmate(),
+    isDraw: game.isDraw() || isRepetitionDraw,
+  };
+}
+
+/**
+ * Evaluates full game termination status including board rules, threefold repetition across full
+ * move history, clock flag, resignation, and draw agreement.
  */
 export function evaluateGameTermination(params: {
   fen: string;
+  initialFen?: string;
+  moves?: MoveRecord[];
+  chess?: Chess;
+  allowCastling?: boolean;
   timeoutLoser?: Color | null;
   resignedBy?: Color | null;
   agreedDraw?: boolean;
@@ -176,7 +394,14 @@ export function evaluateGameTermination(params: {
     };
   }
 
-  const chess = new Chess(params.fen);
+  const allowCastling = params.allowCastling ?? true;
+  const startFen = params.initialFen ?? params.moves?.[0]?.fenBefore ?? params.fen;
+  const chess =
+    params.chess ??
+    (params.moves && params.moves.length > 0
+      ? buildChessWithHistory(startFen, params.moves, allowCastling)
+      : new Chess(allowCastling ? params.fen : stripCastlingRights(params.fen, 'both')));
+
   if (chess.isCheckmate()) {
     const winner: Color = chess.turn() === 'w' ? 'b' : 'w';
     return {
@@ -189,7 +414,15 @@ export function evaluateGameTermination(params: {
   if (chess.isStalemate()) {
     return { isOver: true, winner: 'draw', reason: 'Stalemate', resultString: '1/2-1/2' };
   }
-  if (chess.isThreefoldRepetition()) {
+  if (
+    chess.isThreefoldRepetition() ||
+    (params.moves &&
+      params.moves.length > 0 &&
+      hasThreefoldRepetitionInHistory(
+        allowCastling ? startFen : stripCastlingRights(startFen, 'both'),
+        params.moves
+      ))
+  ) {
     return { isOver: true, winner: 'draw', reason: 'Threefold repetition', resultString: '1/2-1/2' };
   }
   if (chess.isInsufficientMaterial()) {

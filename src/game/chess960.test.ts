@@ -42,12 +42,12 @@ test('Scharnagl numbering generates exact official Chess960 positions for #0, #5
   assert.equal(seen.size, 960);
 });
 
-test('createChess960Position builds mirrored chess.js FEN and Shredder-FEN with full castling rights', () => {
+test('createChess960Position builds mirrored FEN with castling disabled outside Classic mode', () => {
   const pos = createChess960Position(0); // bbqnnrkr
   assert.equal(pos.id, 0);
   assert.equal(pos.fen, 'bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w - - 0 1');
-  assert.equal(pos.shredderFen, 'bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1');
-  assert.deepEqual(pos.castlingRights, { wK: 7, wQ: 5, bK: 7, bQ: 5 });
+  assert.equal(pos.shredderFen, 'bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w - - 0 1');
+  assert.deepEqual(pos.castlingRights, { wK: null, wQ: null, bK: null, bQ: null });
 
   // Verify chess.js accepts the FEN cleanly
   const chess = new Chess(pos.fen);

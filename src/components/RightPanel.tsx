@@ -41,6 +41,7 @@ interface RightPanelProps {
   activeTab: RightPanelTab;
   onTabChange: (tab: RightPanelTab) => void;
   mode: GameMode;
+  showMoveBadges?: boolean;
   moves: MoveRecord[];
   viewPly: number;
   currentFen: string;
@@ -78,6 +79,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   activeTab,
   onTabChange,
   mode,
+  showMoveBadges = mode === 'analysis',
   moves,
   viewPly,
   currentFen,
@@ -369,7 +371,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         }`}
                       >
                         <span>{row.white.san}</span>
-                        {row.white.classification && (
+                        {showMoveBadges && row.white.classification && (
                           <MoveBadge classification={row.white.classification} variant="inline" />
                         )}
                       </button>
@@ -386,7 +388,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         }`}
                       >
                         <span>{row.black.san}</span>
-                        {row.black.classification && (
+                        {showMoveBadges && row.black.classification && (
                           <MoveBadge classification={row.black.classification} variant="inline" />
                         )}
                       </button>
@@ -418,7 +420,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         }`}
                       >
                         <span>{row.white.san}</span>
-                        {row.white.classification && (
+                        {showMoveBadges && row.white.classification && (
                           <MoveBadge classification={row.white.classification} variant="inline" />
                         )}
                       </button>
@@ -438,7 +440,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         }`}
                       >
                         <span>{row.black.san}</span>
-                        {row.black.classification && (
+                        {showMoveBadges && row.black.classification && (
                           <MoveBadge classification={row.black.classification} variant="inline" />
                         )}
                       </button>

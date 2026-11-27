@@ -172,20 +172,13 @@ export function createChess960Position(id?: number, rng: () => number = Math.ran
   }
 
   const backRank = getChess960BackRank(resolvedId);
-  const rookFiles: number[] = [];
-  backRank.forEach((piece, fileIdx) => {
-    if (piece === 'r') rookFiles.push(fileIdx);
-  });
 
-  // Left rook is queenside (Q), right rook is kingside (K)
-  const qRookFile = rookFiles[0];
-  const kRookFile = rookFiles[1];
-
+  // Castling is disabled outside Classic mode
   const castlingRights: Chess960CastlingRights = {
-    wK: kRookFile,
-    wQ: qRookFile,
-    bK: kRookFile,
-    bQ: qRookFile,
+    wK: null,
+    wQ: null,
+    bK: null,
+    bQ: null,
   };
 
   const blackRow = backRank.join('');

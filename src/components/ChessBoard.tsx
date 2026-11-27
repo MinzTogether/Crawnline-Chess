@@ -10,6 +10,7 @@ import {
 } from '../types/chess';
 import type { PieceStyleId } from '../types/preferences';
 import { getChess960LegalTargets, type Chess960CastlingRights } from '../game/chess960';
+import { stripCastlingRights } from '../game/chessLogic';
 import { ChessPiece } from './ChessPieces';
 import { EvalBar } from './EvalBar';
 import { MoveBadge } from './MoveBadge';
@@ -42,6 +43,7 @@ interface ChessBoardProps {
   evalScore: EvalScore | null;
   evalDepth?: number;
   evalStabilizing?: boolean;
+  allowCastling?: boolean;
   chess960Rights?: Chess960CastlingRights | null;
   onMove: (from: Square, to: Square, promotion?: PieceSymbol) => boolean;
 }
@@ -69,6 +71,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   evalScore,
   evalDepth = 0,
   evalStabilizing = false,
+  allowCastling = true,
   chess960Rights = null,
   onMove,
 }) => {
@@ -109,7 +112,11 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   const [markedSquares, setMarkedSquares] = useState<Set<Square>>(new Set());
   const rightDragStartRef = useRef<Square | null>(null);
 
-  const chess = useMemo(() => new Chess(fen), [fen]);
+  const effectiveFen = useMemo(
+    () => (allowCastling ? fen : stripCastlingRights(fen, 'both')),
+    [fen, allowCastling]
+  );
+  const chess = useMemo(() => new Chess(effectiveFen), [effectiveFen]);
   const turn = chess.turn();
   const inCheck = chess.inCheck();
 
