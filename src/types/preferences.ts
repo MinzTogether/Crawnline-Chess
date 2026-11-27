@@ -48,6 +48,7 @@ export type AppThemeId =
 
 export type PieceStyleId =
   | 'classic'
+  | 'staunton-neo'
   | 'ivory'
   | 'gold'
   | 'jade-crystal'
@@ -410,11 +411,23 @@ export interface PieceStyleMeta {
   blackDetail: string;
   pieceOpacity?: number;
   glowColor?: string;
+  /** Optional directory containing transparent {w|b}{k|q|r|b|n|p}.png piece icons */
+  spriteBasePath?: string;
 }
 
 export const PIECE_STYLES: Record<PieceStyleId, PieceStyleMeta> = {
   classic: {
     id: 'classic',
+    name: 'Classic Default',
+    whiteFill: '#FBFBF8',
+    whiteStroke: '#1A1917',
+    blackFill: '#2E2E2E',
+    blackStroke: '#11100F',
+    blackDetail: '#D9D8D4',
+    spriteBasePath: '/assets/pieces/default',
+  },
+  'staunton-neo': {
+    id: 'staunton-neo',
     name: 'Tournament Neo',
     whiteFill: '#FBFBF8',
     whiteStroke: '#1A1917',

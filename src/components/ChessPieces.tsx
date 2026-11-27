@@ -9,8 +9,19 @@ interface ChessPieceProps {
   className?: string;
 }
 
+export function getPieceSpriteUrl(
+  color: Color,
+  type: PieceSymbol,
+  pieceStyle: PieceStyleId = 'classic'
+): string | null {
+  const palette = PIECE_STYLES[pieceStyle] ?? PIECE_STYLES.classic;
+  if (!palette.spriteBasePath) return null;
+  return `${palette.spriteBasePath}/${color}${type}.png`;
+}
+
 /**
- * High-contrast tournament Staunton SVG chess pieces with selectable piece palettes.
+ * High-contrast chess piece renderer: uses custom transparent PNG sprites for the default
+ * classic piece set, and selectable vector Staunton SVG palettes for alternate piece styles.
  */
 export const ChessPiece: React.FC<ChessPieceProps> = React.memo(
   ({ type, color, pieceStyle = 'classic', className = 'w-full h-full' }) => {
@@ -20,11 +31,30 @@ export const ChessPiece: React.FC<ChessPieceProps> = React.memo(
     const stroke = isWhite ? palette.whiteStroke : palette.blackStroke;
     const detailStroke = isWhite ? palette.whiteStroke : palette.blackDetail;
     const baseShadow = isWhite
-      ? 'drop-shadow(0 2px 2px rgba(0, 0, 0, 0.28))'
-      : 'drop-shadow(0 2px 2px rgba(0, 0, 0, 0.36))';
+      ? 'drop-shadow(0 2px 2px rgba(0, 0, 0, 0.24))'
+      : 'drop-shadow(0 2px 2px rgba(0, 0, 0, 0.34))';
     const filterValue = palette.glowColor
       ? `${baseShadow} drop-shadow(0 0 3px ${palette.glowColor})`
       : baseShadow;
+
+    const spriteUrl = getPieceSpriteUrl(color, type, pieceStyle);
+    if (spriteUrl) {
+      return (
+        <img
+          src={spriteUrl}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          decoding="async"
+          data-piece-sprite={`${color}${type}`}
+          className={`${className} object-contain select-none pointer-events-none`}
+          style={{
+            filter: filterValue,
+            opacity: palette.pieceOpacity ?? 1,
+          }}
+        />
+      );
+    }
 
     return (
       <svg
