@@ -5,6 +5,7 @@ import {
   createClockState,
   getClockRemaining,
   pauseClockState,
+  quantizeClockDisplay,
   resumeClockState,
 } from './clock';
 
@@ -69,4 +70,15 @@ test('clock flags active player cleanly when timestamp exceeds remaining time', 
   assert.equal(flagged.b, 0);
   assert.equal(flagged.w, 10);
   assert.equal(flagged.expiredColor, 'b');
+});
+
+test('quantizeClockDisplay buckets >=10s to whole seconds and <10s to tenths', () => {
+  assert.equal(quantizeClockDisplay(299.94), 299);
+  assert.equal(quantizeClockDisplay(299.05), 299);
+  assert.equal(quantizeClockDisplay(10.01), 10);
+  assert.equal(quantizeClockDisplay(9.94), 9.9);
+  assert.equal(quantizeClockDisplay(0.14), 0.1);
+  assert.equal(quantizeClockDisplay(0), 0);
+  assert.equal(quantizeClockDisplay(-2.5), 0);
+  assert.equal(quantizeClockDisplay(Number.NaN), 0);
 });

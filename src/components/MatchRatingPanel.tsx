@@ -19,7 +19,7 @@ interface MatchRatingPanelProps {
   onImportAndRatePgn: (pgn: string) => { ok: boolean; error?: string };
 }
 
-export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
+export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = React.memo(({
   moves,
   viewPly,
   whiteName,
@@ -289,4 +289,6 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
       </div>
     </div>
   );
-};
+});
+
+MatchRatingPanel.displayName = 'MatchRatingPanel';

@@ -130,3 +130,16 @@ export function commitMoveClock(
     expiredColor: null,
   };
 }
+
+/**
+ * Quantizes exact remaining seconds to the display resolution used by `formatClock`:
+ * - 1-second steps when >= 10s (prevents 10Hz React re-renders while keeping ms precision in ClockState)
+ * - 0.1-second steps when 0 < seconds < 10s for smooth final time-scramble countdown
+ */
+export function quantizeClockDisplay(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  if (seconds < 10) {
+    return Math.round(seconds * 10) / 10;
+  }
+  return Math.floor(seconds);
+}

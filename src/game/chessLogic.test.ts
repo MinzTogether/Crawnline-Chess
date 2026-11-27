@@ -9,6 +9,7 @@ import {
   formatMaterialDifference,
   formatPvSanWithNumbers,
   getMaterialSummary,
+  isTacticalPieceSacrifice,
   parsePgnOrFen,
   stripCastlingRights,
   uciLineToSan,
@@ -240,4 +241,76 @@ test('non-classic modes completely forbid castling even with king and rooks on c
   });
   assert.equal(nonClassicOO, null);
   assert.equal(nonClassicOOO, null);
+});
+
+test('isTacticalPieceSacrifice detects true piece sacrifices and ignores quiet or equal trades', () => {
+  // White sacrifices a Rook on e5 (undefended, black pawn d6 can take it)
+  const beforeSacFen = '4k3/8/3p4/8/8/8/8/4R2K w - - 0 1';
+  const sacResult = applyRuleMove({
+    initialFen: beforeSacFen,
+    moves: [],
+    from: 'e1',
+    to: 'e5',
+    allowCastling: true,
+  });
+  assert.ok(sacResult);
+  const sacMove: MoveRecord = {
+    ply: 1,
+    moveNumber: sacResult.moveNumber,
+    color: sacResult.color,
+    san: sacResult.san,
+    uci: sacResult.uci,
+    from: sacResult.from,
+    to: sacResult.to,
+    piece: sacResult.piece,
+    captured: sacResult.captured,
+    promotion: sacResult.promotion,
+    fenBefore: sacResult.fenBefore,
+    fenAfter: sacResult.fenAfter,
+  };
+  assert.equal(isTacticalPieceSacrifice(sacMove), true);
+
+  // Quiet pawn move e2 -> e4 is not a piece sacrifice
+  const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  const quietResult = applyRuleMove({
+    initialFen: startFen,
+    moves: [],
+    from: 'e2',
+    to: 'e4',
+    allowCastling: true,
+  });
+  assert.ok(quietResult);
+  const quietMove: MoveRecord = {
+    ply: 1,
+    moveNumber: quietResult.moveNumber,
+    color: quietResult.color,
+    san: quietResult.san,
+    uci: quietResult.uci,
+    from: quietResult.from,
+    to: quietResult.to,
+    piece: quietResult.piece,
+    captured: quietResult.captured,
+    promotion: quietResult.promotion,
+    fenBefore: quietResult.fenBefore,
+    fenAfter: quietResult.fenAfter,
+  };
+  assert.equal(isTacticalPieceSacrifice(quietMove), false);
+});
+
+test('parsePgnOrFen detects Chess960 variant header in PGN', () => {
+  const chess960Pgn = [
+    '[Event "Chess960 Match"]',
+    '[Variant "Chess960"]',
+    '[SetUp "1"]',
+    '[FEN "bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w - - 0 1"]',
+    '',
+    '1. e4 e5',
+  ].join('\n');
+
+  const res = parsePgnOrFen(chess960Pgn);
+  assert.equal(res.ok, true);
+  if (res.ok) {
+    assert.equal(res.variant, 'Chess960');
+    assert.equal(res.moves.length, 2);
+  }
 });

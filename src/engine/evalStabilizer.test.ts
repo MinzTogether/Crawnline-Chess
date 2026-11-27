@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  MAX_EVAL_CACHE_SIZE,
   MIN_STABLE_DEPTH,
   positionKeyFromFen,
   stabilizeEvaluation,
@@ -93,4 +94,27 @@ test('stabilizeEvaluation immediately reflects forced mate and terminal position
 
   assert.deepEqual(terminalRes.score, { type: 'mate', value: -1 });
   assert.equal(terminalRes.barPercent, 0);
+});
+
+test('stabilizeEvaluation bounds evaluation cache to MAX_EVAL_CACHE_SIZE with LRU eviction', () => {
+  const cache = new Map<string, CachedEvalEntry>();
+  const totalInserts = MAX_EVAL_CACHE_SIZE + 25;
+
+  for (let i = 0; i < totalInserts; i++) {
+    // Vary board part uniquely so positionKeyFromFen is distinct per entry
+    const uniqueFen = `pos-${i} w - - 0 1`;
+    stabilizeEvaluation({
+      fen: uniqueFen,
+      incomingScore: { type: 'cp', value: i },
+      incomingDepth: MIN_STABLE_DEPTH + 4,
+      isSearching: false,
+      cache,
+      displayed: { fen: null, score: null, depth: 0 },
+    });
+  }
+
+  assert.equal(cache.size, MAX_EVAL_CACHE_SIZE);
+  // Oldest entries should have been evicted while newest remain
+  assert.equal(cache.has('pos-0 w - -'), false);
+  assert.equal(cache.has(`pos-${totalInserts - 1} w - -`), true);
 });

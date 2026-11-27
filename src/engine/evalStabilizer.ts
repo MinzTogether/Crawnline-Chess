@@ -43,6 +43,25 @@ export const SAME_FEN_CP_DEADBAND = 14;
 /** Deadband in bar percentage below which visual bar micro-jitter is suppressed while searching. */
 export const SAME_FEN_BAR_DEADBAND = 1.0;
 
+/** Maximum number of evaluated positions kept in memory to prevent unbounded growth across long sessions. */
+export const MAX_EVAL_CACHE_SIZE = 500;
+
+function writeCachedEval(
+  cache: Map<string, CachedEvalEntry>,
+  key: string,
+  entry: CachedEvalEntry
+): void {
+  if (cache.has(key)) {
+    cache.delete(key);
+  } else if (cache.size >= MAX_EVAL_CACHE_SIZE) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey !== undefined) {
+      cache.delete(oldestKey);
+    }
+  }
+  cache.set(key, entry);
+}
+
 /**
  * Normalizes a FEN to its position identity (board + side + castling + ep)
  * so transpositions / halfmove clock differences share cached evaluations safely.
@@ -87,6 +106,11 @@ export function stabilizeEvaluation(input: StabilizerInput): StabilizerOutput {
   const { fen, incomingScore, incomingDepth, isSearching, storedMoveEval, cache, displayed } = input;
   const key = positionKeyFromFen(fen);
   const cached = cache.get(key) ?? null;
+  if (cached) {
+    // Refresh recency for LRU eviction
+    cache.delete(key);
+    cache.set(key, cached);
+  }
 
   // Determine the best authoritative baseline for this FEN before considering shallow streaming updates
   let candidateScore: EvalScore | null = null;
@@ -112,12 +136,12 @@ export function stabilizeEvaluation(input: StabilizerInput): StabilizerOutput {
       candidateScore = incomingScore;
       candidateDepth = incomingDepth;
       if (incomingDepth >= MIN_STABLE_DEPTH || isTerminal) {
-        cache.set(key, { score: incomingScore, depth: incomingDepth });
+        writeCachedEval(cache, key, { score: incomingScore, depth: incomingDepth });
       }
     } else if (isDeepEnough && improvesDepth) {
       candidateScore = incomingScore;
       candidateDepth = incomingDepth;
-      cache.set(key, { score: incomingScore, depth: incomingDepth });
+      writeCachedEval(cache, key, { score: incomingScore, depth: incomingDepth });
     } else if (!candidateScore && incomingDepth >= 4) {
       // Brand new position with no cached/stored eval yet: wait until at least depth 4 before initial draw
       candidateScore = incomingScore;

@@ -18,7 +18,7 @@ interface EvalBarProps {
  * metallic/stone surfaces, advantage graduation ticks, forced-mate highlights,
  * and an on-hover precision telemetry readout.
  */
-export const EvalBar: React.FC<EvalBarProps> = ({
+export const EvalBar: React.FC<EvalBarProps> = React.memo(({
   score,
   orientation,
   depth = 0,
@@ -164,4 +164,6 @@ export const EvalBar: React.FC<EvalBarProps> = ({
       )}
     </div>
   );
-};
+});
+
+EvalBar.displayName = 'EvalBar';

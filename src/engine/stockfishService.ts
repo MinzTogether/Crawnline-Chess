@@ -24,6 +24,74 @@ function getTurnFromFen(fen: string): Color {
   return parts[1] === 'b' ? 'b' : 'w';
 }
 
+/**
+ * Boots a Stockfish Web Worker (WASM with automatic asm.js fallback), runs the UCI handshake
+ * (`uci` -> `uciok` -> `isready` -> `readyok`), and attaches the steady-state message listener.
+ * Both primary and fallback workers attach error handlers so init promises can never hang.
+ */
+function bootStockfishWorker(onMessage: (event: MessageEvent) => void): Promise<Worker> {
+  return new Promise<Worker>((resolve, reject) => {
+    let settled = false;
+    let activeWorker: Worker | null = null;
+
+    const fail = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      activeWorker?.terminate();
+      activeWorker = null;
+      reject(err);
+    };
+
+    const launch = (url: string, allowFallback: boolean) => {
+      let worker: Worker;
+      try {
+        worker = new Worker(url);
+      } catch (err) {
+        if (allowFallback && url.endsWith('stockfish.wasm.js')) {
+          launch('/stockfish/stockfish.js', false);
+          return;
+        }
+        fail(err);
+        return;
+      }
+
+      activeWorker = worker;
+
+      const onInitMessage = (event: MessageEvent) => {
+        if (settled || activeWorker !== worker) return;
+        const line = typeof event.data === 'string' ? event.data : String(event.data ?? '');
+        if (line.includes('uciok')) {
+          worker.postMessage('isready');
+        } else if (line.includes('readyok')) {
+          settled = true;
+          worker.removeEventListener('message', onInitMessage);
+          worker.removeEventListener('error', onInitError);
+          worker.addEventListener('message', onMessage);
+          resolve(worker);
+        }
+      };
+
+      const onInitError = (err: ErrorEvent) => {
+        if (settled || activeWorker !== worker) return;
+        worker.removeEventListener('message', onInitMessage);
+        worker.removeEventListener('error', onInitError);
+        worker.terminate();
+        if (allowFallback && url.endsWith('stockfish.wasm.js')) {
+          launch('/stockfish/stockfish.js', false);
+          return;
+        }
+        fail(err);
+      };
+
+      worker.addEventListener('message', onInitMessage);
+      worker.addEventListener('error', onInitError);
+      worker.postMessage('uci');
+    };
+
+    launch(getStockfishWorkerUrl(), true);
+  });
+}
+
 interface PendingJob {
   fen: string;
   /** Shredder-FEN sent to Stockfish when chess960 is true */
@@ -50,6 +118,7 @@ export class StockfishAnalyzer {
   private initPromise: Promise<void> | null = null;
 
   private phase: 'idle' | 'stopping' | 'syncing' | 'searching' = 'idle';
+  private pendingSyncCount = 0;
   private activeJob: PendingJob | null = null;
   private queuedJob: PendingJob | null = null;
   private currentMultiPv = 1;
@@ -68,50 +137,21 @@ export class StockfishAnalyzer {
     if (this.isReady && this.worker) return;
     if (this.initPromise) return this.initPromise;
 
-    this.initPromise = new Promise<void>((resolve, reject) => {
-      try {
-        const url = getStockfishWorkerUrl();
-        const worker = new Worker(url);
+    this.initPromise = bootStockfishWorker(this.handleMessage)
+      .then((worker) => {
         this.worker = worker;
-
-        const onInitMessage = (event: MessageEvent) => {
-          const line = typeof event.data === 'string' ? event.data : String(event.data ?? '');
-          if (line.includes('uciok')) {
-            worker.postMessage('isready');
-          } else if (line.includes('readyok')) {
-            worker.removeEventListener('message', onInitMessage);
-            worker.addEventListener('message', this.handleMessage);
-            this.isReady = true;
-            this.phase = 'idle';
-            resolve();
-          }
-        };
-
-        worker.addEventListener('message', onInitMessage);
-        worker.addEventListener('error', (err) => {
-          if (!this.isReady) {
-            if (url.endsWith('stockfish.wasm.js')) {
-              try {
-                worker.terminate();
-                const fallback = new Worker('/stockfish/stockfish.js');
-                this.worker = fallback;
-                fallback.addEventListener('message', onInitMessage);
-                fallback.postMessage('uci');
-                return;
-              } catch (fallbackErr) {
-                reject(fallbackErr);
-                return;
-              }
-            }
-            reject(err);
-          }
-        });
-
-        worker.postMessage('uci');
-      } catch (err) {
-        reject(err);
-      }
-    });
+        this.isReady = true;
+        this.phase = 'idle';
+        this.pendingSyncCount = 0;
+      })
+      .catch((err) => {
+        this.worker = null;
+        this.isReady = false;
+        this.initPromise = null;
+        this.phase = 'idle';
+        this.pendingSyncCount = 0;
+        throw err;
+      });
 
     return this.initPromise;
   }
@@ -170,6 +210,7 @@ export class StockfishAnalyzer {
     }
 
     this.phase = 'syncing';
+    this.pendingSyncCount += 1;
     this.worker.postMessage('isready');
   }
 
@@ -181,18 +222,23 @@ export class StockfishAnalyzer {
       if (!line) continue;
       const trimmed = line.trim();
 
-      if (trimmed === 'readyok' && this.phase === 'syncing') {
-        if (this.queuedJob) {
-          // A newer job arrived while syncing; switch straight to it
-          this.startQueuedJob();
-          continue;
+      if (trimmed === 'readyok') {
+        if (this.pendingSyncCount > 0) {
+          this.pendingSyncCount -= 1;
         }
-        if (this.activeJob && this.worker) {
-          this.phase = 'searching';
-          this.worker.postMessage(`position fen ${this.activeJob.engineFen}`);
-          this.worker.postMessage(`go depth ${this.activeJob.depth}`);
-        } else {
-          this.phase = 'idle';
+        if (this.phase === 'syncing' && this.pendingSyncCount === 0) {
+          if (this.queuedJob) {
+            // A newer job arrived while syncing; switch straight to it
+            this.startQueuedJob();
+            continue;
+          }
+          if (this.activeJob && this.worker) {
+            this.phase = 'searching';
+            this.worker.postMessage(`position fen ${this.activeJob.engineFen}`);
+            this.worker.postMessage(`go depth ${this.activeJob.depth}`);
+          } else {
+            this.phase = 'idle';
+          }
         }
         continue;
       }
@@ -357,9 +403,9 @@ export class StockfishAnalyzer {
     if (this.phase === 'searching' && this.worker) {
       this.phase = 'stopping';
       this.worker.postMessage('stop');
-    } else if (this.phase === 'syncing') {
-      this.phase = 'idle';
     }
+    // If phase === 'syncing', leave phase as 'syncing' with activeJob = null so the in-flight
+    // readyok transitions cleanly back to 'idle' (or starts any job queued before readyok arrives).
   }
 
   terminate() {
@@ -369,6 +415,7 @@ export class StockfishAnalyzer {
     this.isReady = false;
     this.initPromise = null;
     this.phase = 'idle';
+    this.pendingSyncCount = 0;
   }
 }
 
@@ -382,6 +429,7 @@ export class StockfishOpponent {
   private resolver: ((uciMove: string | null) => void) | null = null;
   private isSearching = false;
   private currentChess960 = false;
+  private currentSkillLevel: number | null = null;
   private pendingMove: {
     fen: string;
     level: StockfishLevel;
@@ -393,49 +441,17 @@ export class StockfishOpponent {
     if (this.isReady && this.worker) return;
     if (this.initPromise) return this.initPromise;
 
-    this.initPromise = new Promise<void>((resolve, reject) => {
-      try {
-        const url = getStockfishWorkerUrl();
-        const worker = new Worker(url);
+    this.initPromise = bootStockfishWorker(this.handleMessage)
+      .then((worker) => {
         this.worker = worker;
-
-        const onInit = (event: MessageEvent) => {
-          const line = typeof event.data === 'string' ? event.data : String(event.data ?? '');
-          if (line.includes('uciok')) {
-            worker.postMessage('isready');
-          } else if (line.includes('readyok')) {
-            worker.removeEventListener('message', onInit);
-            worker.addEventListener('message', this.handleMessage);
-            this.isReady = true;
-            resolve();
-          }
-        };
-
-        worker.addEventListener('message', onInit);
-        worker.addEventListener('error', (err) => {
-          if (!this.isReady) {
-            if (url.endsWith('stockfish.wasm.js')) {
-              try {
-                worker.terminate();
-                const fallback = new Worker('/stockfish/stockfish.js');
-                this.worker = fallback;
-                fallback.addEventListener('message', onInit);
-                fallback.postMessage('uci');
-                return;
-              } catch (fallbackErr) {
-                reject(fallbackErr);
-                return;
-              }
-            }
-            reject(err);
-          }
-        });
-
-        worker.postMessage('uci');
-      } catch (err) {
-        reject(err);
-      }
-    });
+        this.isReady = true;
+      })
+      .catch((err) => {
+        this.worker = null;
+        this.isReady = false;
+        this.initPromise = null;
+        throw err;
+      });
 
     return this.initPromise;
   }
@@ -450,7 +466,10 @@ export class StockfishOpponent {
       this.currentChess960 = chess960;
       this.worker.postMessage(`setoption name UCI_Chess960 value ${chess960 ? 'true' : 'false'}`);
     }
-    this.worker.postMessage(`setoption name Skill Level value ${level.skillLevel}`);
+    if (this.currentSkillLevel !== level.skillLevel) {
+      this.currentSkillLevel = level.skillLevel;
+      this.worker.postMessage(`setoption name Skill Level value ${level.skillLevel}`);
+    }
     this.worker.postMessage(`position fen ${fen}`);
     this.worker.postMessage(`go depth ${level.depthCap} movetime ${level.moveTimeMs}`);
   }
@@ -514,5 +533,7 @@ export class StockfishOpponent {
     this.isReady = false;
     this.initPromise = null;
     this.isSearching = false;
+    this.currentChess960 = false;
+    this.currentSkillLevel = null;
   }
 }

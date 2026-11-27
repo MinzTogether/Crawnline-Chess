@@ -75,7 +75,66 @@ interface RightPanelProps {
   pgnText: string;
 }
 
-export const RightPanel: React.FC<RightPanelProps> = ({
+interface MoveVcrControlsProps {
+  viewPly: number;
+  totalPlies: number;
+  onSelectPly: (ply: number) => void;
+  onFlipBoard: () => void;
+  className?: string;
+  buttonPaddingClass?: string;
+}
+
+const MoveVcrControls: React.FC<MoveVcrControlsProps> = ({
+  viewPly,
+  totalPlies,
+  onSelectPly,
+  onFlipBoard,
+  className = '',
+  buttonPaddingClass = 'py-2',
+}) => (
+  <div
+    className={`px-3.5 py-2 border-t border-[var(--app-border)] bg-[var(--app-surface-2)] grid grid-cols-5 gap-1 shrink-0 ${className}`}
+  >
+    {[
+      { label: 'First move', disabled: viewPly === 0, onClick: () => onSelectPly(0), icon: ChevronFirst },
+      {
+        label: 'Previous move',
+        disabled: viewPly === 0,
+        onClick: () => onSelectPly(Math.max(0, viewPly - 1)),
+        icon: ChevronLeft,
+      },
+      {
+        label: 'Next move',
+        disabled: viewPly >= totalPlies,
+        onClick: () => onSelectPly(Math.min(totalPlies, viewPly + 1)),
+        icon: ChevronRight,
+      },
+      {
+        label: 'Latest move',
+        disabled: viewPly >= totalPlies,
+        onClick: () => onSelectPly(totalPlies),
+        icon: ChevronLast,
+      },
+      { label: 'Flip board', disabled: false, onClick: onFlipBoard, icon: ArrowUpDown },
+    ].map((btn) => {
+      const Icon = btn.icon;
+      return (
+        <button
+          key={btn.label}
+          type="button"
+          aria-label={btn.label}
+          disabled={btn.disabled}
+          onClick={btn.onClick}
+          className={`${buttonPaddingClass} rounded-md flex items-center justify-center bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-35 text-[var(--app-text)] transition-colors cursor-pointer disabled:cursor-not-allowed`}
+        >
+          <Icon className="w-4 h-4" />
+        </button>
+      );
+    })}
+  </div>
+);
+
+export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   activeTab,
   onTabChange,
   mode,
@@ -115,6 +174,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const { t } = useI18n();
   const moveListContainerRef = useRef<HTMLDivElement>(null);
   const activeMoveBtnRef = useRef<HTMLButtonElement | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+  const importTimerRef = useRef<number | null>(null);
   const [importInput, setImportInput] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
@@ -122,6 +183,13 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const [moveViewMode, setMoveViewMode] = useState<'table' | 'flow'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 768 ? 'flow' : 'table'
   );
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+      if (importTimerRef.current !== null) window.clearTimeout(importTimerRef.current);
+    };
+  }, []);
 
   // Scroll only inside the move list container (never scroll the outer window on mobile)
   useEffect(() => {
@@ -163,7 +231,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     }
   }
 
-  const topScore = engineAnalysis?.lines[0]?.score ?? null;
+  const currentAnalysis =
+    engineAnalysis && engineAnalysis.fen === currentFen ? engineAnalysis : null;
+  const topScore = currentAnalysis?.lines[0]?.score ?? null;
   const whiteWinProb = topScore ? Math.round(evalToWhiteWinProbability(topScore)) : 50;
 
   const handleCopy = async (kind: 'fen' | 'pgn') => {
@@ -189,7 +259,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     }
     if (copied) {
       setCopiedType(kind);
-      setTimeout(() => setCopiedType(null), 1800);
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopiedType(null);
+      }, 1800);
     }
   };
 
@@ -200,7 +274,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
       setImportError(null);
       setImportSuccess('Position loaded into board.');
       setImportInput('');
-      setTimeout(() => setImportSuccess(null), 2200);
+      if (importTimerRef.current !== null) window.clearTimeout(importTimerRef.current);
+      importTimerRef.current = window.setTimeout(() => {
+        importTimerRef.current = null;
+        setImportSuccess(null);
+      }, 2200);
     } else {
       setImportSuccess(null);
       setImportError(res.error ?? 'Invalid notation.');
@@ -261,10 +339,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 <span>Stockfish</span>
                 <span aria-hidden="true">·</span>
                 <span>{topScore ? formatEvalScore(topScore, true) : '0.00'}</span>
-                {engineAnalysis && engineAnalysis.depth > 0 && (
+                {currentAnalysis && currentAnalysis.depth > 0 && (
                   <>
                     <span aria-hidden="true">·</span>
-                    <span>d{engineAnalysis.depth}</span>
+                    <span>d{currentAnalysis.depth}</span>
                   </>
                 )}
               </div>
@@ -454,44 +532,14 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </div>
 
           {/* VCR Controls */}
-          <div className="arena-dock-vcr px-3.5 py-2 border-t border-[var(--app-border)] bg-[var(--app-surface-2)] grid grid-cols-5 gap-1 shrink-0">
-            {[
-              { label: 'First move', disabled: viewPly === 0, onClick: () => onSelectPly(0), icon: ChevronFirst },
-              {
-                label: 'Previous move',
-                disabled: viewPly === 0,
-                onClick: () => onSelectPly(Math.max(0, viewPly - 1)),
-                icon: ChevronLeft,
-              },
-              {
-                label: 'Next move',
-                disabled: viewPly >= moves.length,
-                onClick: () => onSelectPly(Math.min(moves.length, viewPly + 1)),
-                icon: ChevronRight,
-              },
-              {
-                label: 'Latest move',
-                disabled: viewPly >= moves.length,
-                onClick: () => onSelectPly(moves.length),
-                icon: ChevronLast,
-              },
-              { label: 'Flip board', disabled: false, onClick: onFlipBoard, icon: ArrowUpDown },
-            ].map((btn) => {
-              const Icon = btn.icon;
-              return (
-                <button
-                  key={btn.label}
-                  type="button"
-                  aria-label={btn.label}
-                  disabled={btn.disabled}
-                  onClick={btn.onClick}
-                  className="py-2.5 lg:py-2 rounded-md flex items-center justify-center bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-35 text-[var(--app-text)] transition-colors cursor-pointer disabled:cursor-not-allowed"
-                >
-                  <Icon className="w-4 h-4" />
-                </button>
-              );
-            })}
-          </div>
+          <MoveVcrControls
+            viewPly={viewPly}
+            totalPlies={moves.length}
+            onSelectPly={onSelectPly}
+            onFlipBoard={onFlipBoard}
+            className="arena-dock-vcr"
+            buttonPaddingClass="py-2.5 lg:py-2"
+          />
 
           {/* Action Footer */}
           <div className="arena-dock-footer p-3.5 border-t border-[var(--app-border)] bg-[var(--app-surface-2)] flex flex-col gap-2 shrink-0">
@@ -574,44 +622,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             onSelectPly={onSelectPly}
             onImportAndRatePgn={onImportAndRatePgn}
           />
-          <div className="px-3.5 py-2 border-t border-[var(--app-border)] bg-[var(--app-surface-2)] grid grid-cols-5 gap-1 shrink-0">
-            {[
-              { label: 'First move', disabled: viewPly === 0, onClick: () => onSelectPly(0), icon: ChevronFirst },
-              {
-                label: 'Previous move',
-                disabled: viewPly === 0,
-                onClick: () => onSelectPly(Math.max(0, viewPly - 1)),
-                icon: ChevronLeft,
-              },
-              {
-                label: 'Next move',
-                disabled: viewPly >= moves.length,
-                onClick: () => onSelectPly(Math.min(moves.length, viewPly + 1)),
-                icon: ChevronRight,
-              },
-              {
-                label: 'Latest move',
-                disabled: viewPly >= moves.length,
-                onClick: () => onSelectPly(moves.length),
-                icon: ChevronLast,
-              },
-              { label: 'Flip board', disabled: false, onClick: onFlipBoard, icon: ArrowUpDown },
-            ].map((btn) => {
-              const Icon = btn.icon;
-              return (
-                <button
-                  key={btn.label}
-                  type="button"
-                  aria-label={btn.label}
-                  disabled={btn.disabled}
-                  onClick={btn.onClick}
-                  className="py-2 rounded-md flex items-center justify-center bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-35 text-[var(--app-text)] transition-colors cursor-pointer disabled:cursor-not-allowed"
-                >
-                  <Icon className="w-4 h-4" />
-                </button>
-              );
-            })}
-          </div>
+          <MoveVcrControls
+            viewPly={viewPly}
+            totalPlies={moves.length}
+            onSelectPly={onSelectPly}
+            onFlipBoard={onFlipBoard}
+          />
         </div>
       )}
 
@@ -627,7 +643,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <h2 className="text-sm font-bold text-[var(--app-text)]">Stockfish WASM Engine</h2>
               <p className="text-xs text-[var(--app-text-muted)] font-mono tabular-nums mt-0.5">
                 {engineEnabled
-                  ? `Depth ${engineAnalysis?.depth ?? 0}/${analysisDepth} · ${formatNodes(engineAnalysis?.nodes ?? 0)} nodes · ${formatNodes(engineAnalysis?.nps ?? 0)}/s`
+                  ? `Depth ${currentAnalysis?.depth ?? 0}/${analysisDepth} · ${formatNodes(currentAnalysis?.nodes ?? 0)} nodes · ${formatNodes(currentAnalysis?.nps ?? 0)}/s`
                   : 'Engine paused'}
               </p>
             </div>
@@ -696,15 +712,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               <div className="py-6 text-center text-xs text-[var(--app-text-muted)] bg-[var(--app-surface-2)] rounded-lg">
                 Resume Stockfish to view live top variations.
               </div>
-            ) : !engineAnalysis || engineAnalysis.lines.length === 0 ? (
+            ) : !currentAnalysis || currentAnalysis.lines.length === 0 ? (
               <div className="py-6 text-center text-xs text-[var(--app-text-muted)] bg-[var(--app-surface-2)] rounded-lg">
                 Calculating principal variations…
               </div>
             ) : (
-              engineAnalysis.lines.map((line) => {
+              currentAnalysis.lines.map((line) => {
                 const scoreStr = formatEvalScore(line.score, true);
                 const isWhiteAdv = line.score.value >= 0;
-                const pvText = formatPvSanWithNumbers(engineAnalysis.fen, line.pvSan);
+                const pvText = formatPvSanWithNumbers(currentAnalysis.fen, line.pvSan);
                 const firstUci = line.pvUci[0];
 
                 return (
@@ -846,4 +862,6 @@ export const RightPanel: React.FC<RightPanelProps> = ({
       )}
     </aside>
   );
-};
+});
+
+RightPanel.displayName = 'RightPanel';

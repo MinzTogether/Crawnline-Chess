@@ -1,6 +1,13 @@
-import type { BoardThemeId } from './chess';
+import { BOARD_THEMES, type BoardThemeId } from './chess';
 import type { AppLanguage } from '../i18n/translations';
-import type { AnimationEasingId, AnimationLevelId } from '../utils/animationConfig';
+import {
+  ANIMATION_EASING_CURVES,
+  ANIMATION_PRESET_DEFAULTS,
+  clampPieceSpeedMs,
+  clampUiSpeedMultiplier,
+  type AnimationEasingId,
+  type AnimationLevelId,
+} from '../utils/animationConfig';
 import { resolveAppIconId, type AppIconId } from '../utils/appIconCatalog';
 
 export type { AnimationEasingId, AnimationLevelId, AppIconId };
@@ -673,17 +680,179 @@ const PREFS_KEY = 'crownline_preferences_v1';
 const PROFILE_KEY = 'crownline_profile_v1';
 const MATCHES_KEY = 'crownline_matches_v1';
 
+const VALID_APP_THEMES = new Set<string>(APP_THEMES.map((t) => t.id));
+const VALID_LANGUAGES = new Set<AppLanguage>(['en', 'vi', 'zh-TW', 'ja']);
+const VALID_RESULTS = new Set<SavedMatch['result']>(['1-0', '0-1', '1/2-1/2', '*']);
+const VALID_USER_SIDES = new Set<'w' | 'b' | 'both'>(['w', 'b', 'both']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.round(Math.min(max, Math.max(min, value)));
+}
+
+function readBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function readString(value: unknown, fallback: string, maxLen = 200): string {
+  if (typeof value !== 'string') return fallback;
+  return value.slice(0, maxLen);
+}
+
+function readNullableNumber(value: unknown, min: number, max: number): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.min(max, Math.max(min, value));
+}
+
+export function sanitizePreferences(raw: unknown): AppPreferences {
+  if (!isRecord(raw)) return { ...DEFAULT_PREFERENCES };
+
+  const appTheme: AppThemeId =
+    typeof raw.appTheme === 'string' && VALID_APP_THEMES.has(raw.appTheme)
+      ? (raw.appTheme as AppThemeId)
+      : DEFAULT_PREFERENCES.appTheme;
+
+  const boardTheme: BoardThemeId =
+    typeof raw.boardTheme === 'string' && Object.prototype.hasOwnProperty.call(BOARD_THEMES, raw.boardTheme)
+      ? (raw.boardTheme as BoardThemeId)
+      : DEFAULT_PREFERENCES.boardTheme;
+
+  const pieceStyle: PieceStyleId =
+    typeof raw.pieceStyle === 'string' && Object.prototype.hasOwnProperty.call(PIECE_STYLES, raw.pieceStyle)
+      ? (raw.pieceStyle as PieceStyleId)
+      : DEFAULT_PREFERENCES.pieceStyle;
+
+  const language: AppLanguage =
+    typeof raw.language === 'string' && VALID_LANGUAGES.has(raw.language as AppLanguage)
+      ? (raw.language as AppLanguage)
+      : DEFAULT_PREFERENCES.language;
+
+  const animationLevel: AnimationLevelId =
+    typeof raw.animationLevel === 'string' &&
+    Object.prototype.hasOwnProperty.call(ANIMATION_PRESET_DEFAULTS, raw.animationLevel)
+      ? (raw.animationLevel as AnimationLevelId)
+      : DEFAULT_PREFERENCES.animationLevel;
+
+  const animationEasing: AnimationEasingId =
+    typeof raw.animationEasing === 'string' &&
+    Object.prototype.hasOwnProperty.call(ANIMATION_EASING_CURVES, raw.animationEasing)
+      ? (raw.animationEasing as AnimationEasingId)
+      : DEFAULT_PREFERENCES.animationEasing;
+
+  return {
+    appTheme,
+    appIcon: resolveAppIconId(typeof raw.appIcon === 'string' ? raw.appIcon : undefined),
+    boardTheme,
+    pieceStyle,
+    language,
+    animationLevel,
+    pieceSpeedMs:
+      typeof raw.pieceSpeedMs === 'number'
+        ? clampPieceSpeedMs(raw.pieceSpeedMs)
+        : DEFAULT_PREFERENCES.pieceSpeedMs,
+    uiSpeedMultiplier:
+      typeof raw.uiSpeedMultiplier === 'number'
+        ? clampUiSpeedMultiplier(raw.uiSpeedMultiplier)
+        : DEFAULT_PREFERENCES.uiSpeedMultiplier,
+    animationEasing,
+    pieceLiftEffect: readBool(raw.pieceLiftEffect, DEFAULT_PREFERENCES.pieceLiftEffect),
+    pieceMoveAnimation: readBool(raw.pieceMoveAnimation, DEFAULT_PREFERENCES.pieceMoveAnimation),
+    badgePopAnimation: readBool(raw.badgePopAnimation, DEFAULT_PREFERENCES.badgePopAnimation),
+    boardHighlightsAnimation: readBool(
+      raw.boardHighlightsAnimation,
+      DEFAULT_PREFERENCES.boardHighlightsAnimation
+    ),
+    evalBarAnimation: readBool(raw.evalBarAnimation, DEFAULT_PREFERENCES.evalBarAnimation),
+    uiTransitions: readBool(raw.uiTransitions, DEFAULT_PREFERENCES.uiTransitions),
+    showCoordinates: readBool(raw.showCoordinates, DEFAULT_PREFERENCES.showCoordinates),
+    showLegalMoves: readBool(raw.showLegalMoves, DEFAULT_PREFERENCES.showLegalMoves),
+    showEvalBar: readBool(raw.showEvalBar, DEFAULT_PREFERENCES.showEvalBar),
+    showMaterialDifference: readBool(
+      raw.showMaterialDifference,
+      DEFAULT_PREFERENCES.showMaterialDifference
+    ),
+    muted: readBool(raw.muted, DEFAULT_PREFERENCES.muted),
+    analysisDepth: clampInt(raw.analysisDepth, 8, 22, DEFAULT_PREFERENCES.analysisDepth),
+    multiPv: clampInt(raw.multiPv, 1, 3, DEFAULT_PREFERENCES.multiPv),
+  };
+}
+
+export function sanitizeProfile(raw: unknown): UserProfile {
+  if (!isRecord(raw)) return { ...DEFAULT_PROFILE };
+
+  const displayName = readString(raw.displayName, DEFAULT_PROFILE.displayName, 40).trim();
+  const title = readString(raw.title, DEFAULT_PROFILE.title, 32).trim();
+  const avatarColor =
+    typeof raw.avatarColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(raw.avatarColor)
+      ? raw.avatarColor
+      : DEFAULT_PROFILE.avatarColor;
+  const avatarImage =
+    typeof raw.avatarImage === 'string' && raw.avatarImage.startsWith('data:image/')
+      ? raw.avatarImage
+      : null;
+  const bio = readString(raw.bio, DEFAULT_PROFILE.bio, 240);
+
+  return {
+    displayName: displayName || DEFAULT_PROFILE.displayName,
+    title: title || DEFAULT_PROFILE.title,
+    avatarColor,
+    avatarImage,
+    bio,
+  };
+}
+
+export function sanitizeSavedMatches(raw: unknown): SavedMatch[] {
+  if (!Array.isArray(raw)) return SEEDED_MATCHES;
+
+  const valid: SavedMatch[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const id = readString(item.id, '', 80).trim();
+    const pgn = readString(item.pgn, '', 20000).trim();
+    if (!id || !pgn) continue;
+
+    const result: SavedMatch['result'] =
+      typeof item.result === 'string' && VALID_RESULTS.has(item.result as SavedMatch['result'])
+        ? (item.result as SavedMatch['result'])
+        : '*';
+
+    const userSide =
+      typeof item.userSide === 'string' && VALID_USER_SIDES.has(item.userSide as 'w' | 'b' | 'both')
+        ? (item.userSide as 'w' | 'b' | 'both')
+        : undefined;
+
+    valid.push({
+      id,
+      date: readString(item.date, 'Today', 40) || 'Today',
+      whiteName: readString(item.whiteName, 'White', 60) || 'White',
+      blackName: readString(item.blackName, 'Black', 60) || 'Black',
+      result,
+      reason: readString(item.reason, '', 80),
+      openingName: readString(item.openingName, 'Standard Position', 120) || 'Standard Position',
+      movesCount: clampInt(item.movesCount, 0, 500, 0),
+      pgn,
+      whiteAccuracy: readNullableNumber(item.whiteAccuracy, 0, 100),
+      blackAccuracy: readNullableNumber(item.blackAccuracy, 0, 100),
+      whiteGameElo: readNullableNumber(item.whiteGameElo, 100, 4000),
+      blackGameElo: readNullableNumber(item.blackGameElo, 100, 4000),
+      userSide,
+    });
+    if (valid.length >= 25) break;
+  }
+
+  return valid.length > 0 ? valid : SEEDED_MATCHES;
+}
+
 export function loadPreferences(): AppPreferences {
   if (typeof window === 'undefined') return DEFAULT_PREFERENCES;
   try {
     const raw = window.localStorage.getItem(PREFS_KEY);
     if (!raw) return DEFAULT_PREFERENCES;
-    const parsed = JSON.parse(raw);
-    return {
-      ...DEFAULT_PREFERENCES,
-      ...parsed,
-      appIcon: resolveAppIconId(parsed?.appIcon),
-    };
+    return sanitizePreferences(JSON.parse(raw));
   } catch {
     return DEFAULT_PREFERENCES;
   }
@@ -703,7 +872,7 @@ export function loadProfile(): UserProfile {
   try {
     const raw = window.localStorage.getItem(PROFILE_KEY);
     if (!raw) return DEFAULT_PROFILE;
-    return { ...DEFAULT_PROFILE, ...JSON.parse(raw) };
+    return sanitizeProfile(JSON.parse(raw));
   } catch {
     return DEFAULT_PROFILE;
   }
@@ -723,9 +892,7 @@ export function loadSavedMatches(): SavedMatch[] {
   try {
     const raw = window.localStorage.getItem(MATCHES_KEY);
     if (!raw) return SEEDED_MATCHES;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return SEEDED_MATCHES;
-    return parsed;
+    return sanitizeSavedMatches(JSON.parse(raw));
   } catch {
     return SEEDED_MATCHES;
   }

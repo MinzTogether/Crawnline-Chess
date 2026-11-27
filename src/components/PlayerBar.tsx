@@ -17,7 +17,7 @@ interface PlayerBarProps {
   accuracy: number | null;
 }
 
-export const PlayerBar: React.FC<PlayerBarProps> = ({
+export const PlayerBar: React.FC<PlayerBarProps> = React.memo(({
   name,
   subtitle,
   color,
@@ -116,4 +116,6 @@ export const PlayerBar: React.FC<PlayerBarProps> = ({
       )}
     </div>
   );
-};
+});
+
+PlayerBar.displayName = 'PlayerBar';

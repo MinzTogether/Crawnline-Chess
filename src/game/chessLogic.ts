@@ -85,6 +85,31 @@ export function formatMaterialDifference(
 }
 
 /**
+ * Checks whether a move leaves a non-pawn piece (N, B, R, Q) hanging for a net material sacrifice
+ * of at least 2 points — used to award Brilliant (!!) classifications during analysis.
+ */
+export function isTacticalPieceSacrifice(move: MoveRecord): boolean {
+  if (move.piece === 'p' || move.piece === 'k') return false;
+  const before = getMaterialSummary(move.fenBefore).advantage;
+  const after = getMaterialSummary(move.fenAfter).advantage;
+  const moverMaterialDelta = move.color === 'w' ? after - before : before - after;
+  if (moverMaterialDelta >= 2) return false;
+
+  try {
+    const nextChess = new Chess(move.fenAfter);
+    const opponentCaptures = nextChess
+      .moves({ verbose: true })
+      .filter((m) => m.to === move.to && Boolean(m.captured));
+    if (opponentCaptures.length === 0) return false;
+    const sacrificedVal = PIECE_VALUES[move.piece] ?? 0;
+    const capturedVal = move.captured ? PIECE_VALUES[move.captured] ?? 0 : 0;
+    return sacrificedVal - capturedVal >= 2;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Converts a Stockfish UCI principal variation (e.g. ['e2e4', 'e7e5', 'g1f3'])
  * starting from `fen` into clean SAN tokens (e.g. ['e4', 'e5', 'Nf3']).
  */
@@ -442,6 +467,7 @@ export function parsePgnOrFen(input: string): {
   ok: true;
   initialFen: string;
   moves: MoveRecord[];
+  variant?: 'Chess960';
 } | {
   ok: false;
   error: string;
@@ -468,9 +494,12 @@ export function parsePgnOrFen(input: string): {
     pgnChess.loadPgn(trimmed);
     const verboseHistory = pgnChess.history({ verbose: true });
 
-    // Extract custom starting FEN header if present
+    // Extract custom starting FEN and variant headers if present
     const headers = pgnChess.getHeaders();
     const startFen = headers['FEN'] || new Chess().fen();
+    const variantHeader = (headers['Variant'] ?? '').trim().toLowerCase();
+    const variant: 'Chess960' | undefined =
+      variantHeader === 'chess960' || variantHeader === 'fischerandom' ? 'Chess960' : undefined;
     const replay = new Chess(startFen);
     const records: MoveRecord[] = [];
 
@@ -499,7 +528,7 @@ export function parsePgnOrFen(input: string): {
       });
     });
 
-    return { ok: true, initialFen: startFen, moves: records };
+    return { ok: true, initialFen: startFen, moves: records, variant };
   } catch {
     return { ok: false, error: 'Could not parse input as valid FEN or PGN.' };
   }

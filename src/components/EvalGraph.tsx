@@ -9,7 +9,7 @@ interface EvalGraphProps {
   liveEval?: EvalScore | null;
 }
 
-export const EvalGraph: React.FC<EvalGraphProps> = ({ moves, viewPly, onSelectPly, liveEval }) => {
+export const EvalGraph: React.FC<EvalGraphProps> = React.memo(({ moves, viewPly, onSelectPly, liveEval }) => {
   const width = 320;
   const height = 74;
   const padX = 4;
@@ -108,4 +108,6 @@ export const EvalGraph: React.FC<EvalGraphProps> = ({ moves, viewPly, onSelectPl
       </svg>
     </div>
   );
-};
+});
+
+EvalGraph.displayName = 'EvalGraph';

@@ -17,7 +17,7 @@ interface MobileMoveBarProps {
  * Compact, thumb-friendly horizontal move history ribbon for mobile & tablet screens (< lg).
  * Keeps move notation and quick < / > stepping directly alongside the board without scrolling.
  */
-export const MobileMoveBar: React.FC<MobileMoveBarProps> = ({
+export const MobileMoveBar: React.FC<MobileMoveBarProps> = React.memo(({
   moves,
   viewPly,
   opening,
@@ -142,4 +142,6 @@ export const MobileMoveBar: React.FC<MobileMoveBarProps> = ({
       </div>
     </div>
   );
-};
+});
+
+MobileMoveBar.displayName = 'MobileMoveBar';

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 import type { Color, PieceSymbol, Square } from 'chess.js';
 import {
@@ -56,7 +56,7 @@ function squareToBoardCoords(sq: Square, orientation: Color): { x: number; y: nu
   return { x: col * 100 + 50, y: row * 100 + 50 };
 }
 
-export const ChessBoard: React.FC<ChessBoardProps> = ({
+export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
   fen,
   orientation,
   themeId,
@@ -111,12 +111,32 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   const [userArrows, setUserArrows] = useState<BoardArrow[]>([]);
   const [markedSquares, setMarkedSquares] = useState<Set<Square>>(new Set());
   const rightDragStartRef = useRef<Square | null>(null);
+  const suppressNextClickRef = useRef(false);
 
   const effectiveFen = useMemo(
     () => (allowCastling ? fen : stripCastlingRights(fen, 'both')),
     [fen, allowCastling]
   );
-  const chess = useMemo(() => new Chess(effectiveFen), [effectiveFen]);
+
+  // Reset transient selection, drag, promotion, and annotation state whenever the board position changes
+  useEffect(() => {
+    setSelectedSquare(null);
+    setDraggingFrom(null);
+    setDragPos(null);
+    setPendingPromotion(null);
+    setUserArrows([]);
+    setMarkedSquares(new Set());
+    rightDragStartRef.current = null;
+    suppressNextClickRef.current = false;
+  }, [effectiveFen]);
+
+  const chess = useMemo(() => {
+    try {
+      return new Chess(effectiveFen);
+    } catch {
+      return new Chess();
+    }
+  }, [effectiveFen]);
   const turn = chess.turn();
   const inCheck = chess.inCheck();
 
@@ -234,6 +254,10 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   };
 
   const handleSquareClick = (sq: Square) => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
     if (pendingPromotion) return;
 
     // Clear right-click highlights on normal left click
@@ -315,6 +339,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
       const moved = attemptMove(fromSq, targetSq);
       if (!moved) {
         setSelectedSquare(fromSq);
+        suppressNextClickRef.current = true;
       }
     }
   };
@@ -344,6 +369,14 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
         onPointerMove={handleBoardPointerMove}
         onPointerUp={handleBoardPointerUp}
         onPointerLeave={() => {
+          rightDragStartRef.current = null;
+          if (draggingFrom) {
+            setDraggingFrom(null);
+            setDragPos(null);
+          }
+        }}
+        onPointerCancel={() => {
+          rightDragStartRef.current = null;
           if (draggingFrom) {
             setDraggingFrom(null);
             setDragPos(null);
@@ -580,4 +613,6 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
       </div>
     </div>
   );
-};
+});
+
+ChessBoard.displayName = 'ChessBoard';
