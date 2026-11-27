@@ -12,6 +12,7 @@ import type { PieceStyleId } from '../types/preferences';
 import { ChessPiece } from './ChessPieces';
 import { EvalBar } from './EvalBar';
 import { MoveBadge } from './MoveBadge';
+import { useI18n } from '../i18n/LanguageContext';
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const;
 const RANKS = ['8', '7', '6', '5', '4', '3', '2', '1'] as const;
@@ -68,8 +69,32 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   evalStabilizing = false,
   onMove,
 }) => {
+  const { t } = useI18n();
   const theme = BOARD_THEMES[themeId] ?? BOARD_THEMES.tournament;
   const boardRef = useRef<HTMLDivElement>(null);
+
+  // Compute percentage delta so the moved piece glides smoothly from its origin square
+  const slideDelta = useMemo(() => {
+    if (!lastMove) return null;
+    const fromFile = FILES.indexOf(lastMove.from[0] as (typeof FILES)[number]);
+    const fromRank = parseInt(lastMove.from[1], 10);
+    const toFile = FILES.indexOf(lastMove.to[0] as (typeof FILES)[number]);
+    const toRank = parseInt(lastMove.to[1], 10);
+    if (fromFile < 0 || toFile < 0 || Number.isNaN(fromRank) || Number.isNaN(toRank)) return null;
+
+    const fromCol = orientation === 'w' ? fromFile : 7 - fromFile;
+    const toCol = orientation === 'w' ? toFile : 7 - toFile;
+    const fromRow = orientation === 'w' ? 8 - fromRank : fromRank - 1;
+    const toRow = orientation === 'w' ? 8 - toRank : toRank - 1;
+
+    // Account for piece container being 88% of square width/height
+    const scaleFactor = 100 / 88;
+    return {
+      x: `${(fromCol - toCol) * 100 * scaleFactor}%`,
+      y: `${(fromRow - toRow) * 100 * scaleFactor}%`,
+      key: `${lastMove.from}-${lastMove.to}-${fen.split(' ')[0]}`,
+    };
+  }, [lastMove, orientation, fen]);
 
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [draggingFrom, setDraggingFrom] = useState<Square | null>(null);
@@ -331,7 +356,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                   {/* King in check radial glow */}
                   {isCheckedKing && (
                     <span
-                      className="absolute inset-0 pointer-events-none"
+                      className="absolute inset-0 pointer-events-none anim-check-pulse"
                       style={{
                         background:
                           'radial-gradient(circle at center, rgba(224,48,48,0.88) 0%, rgba(224,48,48,0.5) 55%, rgba(224,48,48,0) 80%)',
@@ -364,29 +389,39 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                     <span
                       className={
                         targetMeta.isCapture
-                          ? 'absolute inset-[7%] rounded-full border-[5px] sm:border-[6px] border-black/22 pointer-events-none z-10'
-                          : 'w-[30%] h-[30%] rounded-full bg-black/22 pointer-events-none z-10'
+                          ? 'absolute inset-[7%] rounded-full border-[5px] sm:border-[6px] border-black/22 pointer-events-none z-10 anim-dot-pop'
+                          : 'w-[30%] h-[30%] rounded-full bg-black/22 pointer-events-none z-10 anim-dot-pop'
                       }
                     />
                   )}
 
-                  {/* Chess Piece SVG */}
+                  {/* Chess Piece SVG with smooth square-to-square glide on last move */}
                   {piece && draggingFrom !== sq && (
                     <div
+                      key={isLastTo && slideDelta ? slideDelta.key : `${sq}-${piece.color}-${piece.type}`}
                       className={`w-[88%] h-[88%] relative z-10 pointer-events-none ${
-                        isLastTo ? 'animate-piece-pop' : ''
+                        isLastTo && slideDelta ? 'anim-piece-slide' : ''
                       }`}
+                      style={
+                        isLastTo && slideDelta
+                          ? ({
+                              '--slide-x': slideDelta.x,
+                              '--slide-y': slideDelta.y,
+                            } as React.CSSProperties)
+                          : undefined
+                      }
                     >
                       <ChessPiece type={piece.type} color={piece.color} pieceStyle={pieceStyle} />
                     </div>
                   )}
 
-                  {/* Redesigned vector move evaluation badge on destination square */}
+                  {/* Chess.com-style move evaluation badge on destination square */}
                   {moveClassification && (
                     <MoveBadge
+                      key={`badge-${sq}-${moveClassification}-${fen.split(' ')[0]}`}
                       classification={moveClassification}
                       variant="board"
-                      className="absolute -top-0.5 -right-0.5 z-20 pointer-events-none"
+                      className="absolute -top-0.5 -right-0.5 z-20 pointer-events-none anim-badge-pop"
                     />
                   )}
                 </button>
@@ -462,24 +497,24 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
 
         {/* Pawn Promotion Dialog */}
         {pendingPromotion && (
-          <div className="absolute inset-0 z-40 bg-black/55 flex items-center justify-center p-4">
+          <div className="absolute inset-0 z-40 bg-black/55 flex items-center justify-center p-4 anim-backdrop-enter">
             <div
               role="dialog"
-              aria-label="Choose promotion piece"
-              className="bg-[var(--app-surface)] border border-[var(--app-border-strong)] rounded-xl p-4 shadow-2xl flex flex-col items-center gap-3"
+              aria-label={t('promotePawn')}
+              className="bg-[var(--app-surface)] border border-[var(--app-border-strong)] rounded-xl p-4 shadow-2xl flex flex-col items-center gap-3 anim-modal-enter"
             >
-              <span className="text-sm font-semibold text-[var(--app-text)]">Promote Pawn</span>
+              <span className="text-sm font-semibold text-[var(--app-text)]">{t('promotePawn')}</span>
               <div className="flex items-center gap-2">
                 {(['q', 'r', 'b', 'n'] as PieceSymbol[]).map((promo) => (
                   <button
                     key={promo}
                     type="button"
-                    aria-label={`Promote to ${PIECE_NAMES[promo]}`}
+                    aria-label={`${t('promotePawn')} ${PIECE_NAMES[promo]}`}
                     onClick={() => {
                       onMove(pendingPromotion.from, pendingPromotion.to, promo);
                       setPendingPromotion(null);
                     }}
-                    className="w-14 h-14 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-accent-soft)] border border-[var(--app-border)] hover:border-[var(--app-accent)] p-1.5 transition-colors cursor-pointer"
+                    className="w-14 h-14 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-accent-soft)] border border-[var(--app-border)] hover:border-[var(--app-accent)] p-1.5 anim-interactive cursor-pointer"
                   >
                     <ChessPiece type={promo} color={pendingPromotion.color} pieceStyle={pieceStyle} />
                   </button>
@@ -490,7 +525,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                 onClick={() => setPendingPromotion(null)}
                 className="text-xs text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer"
               >
-                Cancel
+                {t('cancel')}
               </button>
             </div>
           </div>

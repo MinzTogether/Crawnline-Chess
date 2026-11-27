@@ -25,6 +25,7 @@ import {
   type SavedMatch,
   type UserProfile,
 } from '../types/preferences';
+import { useI18n } from '../i18n/LanguageContext';
 import { AppLogoIcon } from './AppIcons';
 import { SettingsSection, type SettingsSubPage } from './SettingsSection';
 
@@ -108,6 +109,7 @@ export const MainHub: React.FC<MainHubProps> = ({
   onStartMatch,
   onOpenMatchRating,
 }) => {
+  const { t } = useI18n();
   const [pgnQuickInput, setPgnQuickInput] = useState('');
   const [pgnQuickError, setPgnQuickError] = useState<string | null>(null);
   const [profileSavedToast, setProfileSavedToast] = useState(false);
@@ -182,19 +184,19 @@ export const MainHub: React.FC<MainHubProps> = ({
   }, [savedMatches]);
 
   const navItems: { id: HubSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'home', label: 'Home', icon: Home },
-    { id: 'settings', label: 'Settings', icon: Settings },
-    { id: 'profile', label: 'Profile', icon: User },
+    { id: 'home', label: t('navHome'), icon: Home },
+    { id: 'settings', label: t('navSettings'), icon: Settings },
+    { id: 'profile', label: t('navProfile'), icon: User },
   ];
 
   const handleQuickRateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!pgnQuickInput.trim()) {
-      setPgnQuickError('Paste a PGN move list or pick a match below to rate.');
+      setPgnQuickError(t('pgnEmptyError'));
       return;
     }
     setPgnQuickError(null);
-    onOpenMatchRating(pgnQuickInput.trim(), 'Rated Match Review');
+    onOpenMatchRating(pgnQuickInput.trim(), t('modeAnalysisTitle'));
   };
 
   return (
@@ -213,7 +215,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                 Crownline
               </div>
               <div className="text-[11px] text-[var(--app-text-muted)] mt-1 truncate">
-                Chess &amp; Stockfish
+                {t('brandSubtitle')}
               </div>
             </div>
           </div>
@@ -229,7 +231,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                   type="button"
                   aria-current={active ? 'page' : undefined}
                   onClick={() => handleSelectNavSection(item.id)}
-                  className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                  className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-bold transition-colors cursor-pointer whitespace-nowrap anim-interactive ${
                     active
                       ? 'bg-[var(--app-surface)] text-[var(--app-text)] shadow-sm border border-[var(--app-border)]'
                       : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:bg-[var(--app-surface-hover)] border border-transparent'
@@ -251,7 +253,7 @@ export const MainHub: React.FC<MainHubProps> = ({
         <button
           type="button"
           onClick={() => handleSelectNavSection('profile')}
-          className="w-full overflow-hidden flex items-center gap-3 p-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors text-left cursor-pointer"
+          className="w-full overflow-hidden flex items-center gap-3 p-2.5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors text-left cursor-pointer anim-interactive"
         >
           {profile.avatarImage ? (
             <img
@@ -311,7 +313,11 @@ export const MainHub: React.FC<MainHubProps> = ({
       <main className="flex-1 min-w-0 pb-20 md:pb-8">
         {/* ================= HOME VIEW (CHESS.COM-STYLE MODE LAUNCHER, NO BOARD) ================= */}
         {section === 'home' && (
-          <div className="max-w-[1120px] mx-auto px-4 sm:px-8 py-6 sm:py-9 flex flex-col gap-7" data-testid="home-mode-hub">
+          <div
+            key="hub-home"
+            className="max-w-[1120px] mx-auto px-4 sm:px-8 py-6 sm:py-9 flex flex-col gap-7 anim-view-enter"
+            data-testid="home-mode-hub"
+          >
             {/* Compact Player Header Row (Chess.com Home style) */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[var(--app-border)]">
               <div className="flex items-center gap-3.5 min-w-0">
@@ -319,7 +325,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                   type="button"
                   onClick={() => handleSelectNavSection('profile')}
                   aria-label={`Open profile for ${safeDisplayName}`}
-                  className="shrink-0 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)] cursor-pointer"
+                  className="shrink-0 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)] cursor-pointer anim-interactive"
                 >
                   {profile.avatarImage ? (
                     <img
@@ -344,19 +350,25 @@ export const MainHub: React.FC<MainHubProps> = ({
                     {safeDisplayName}
                   </h1>
                   <p className="text-sm text-[var(--app-text-muted)] mt-0.5 truncate">
-                    {safeTitle} · Choose a mode to play or rate a match with Stockfish
+                    {safeTitle} · {t('homeSubtitleSuffix')}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-3 text-xs text-[var(--app-text-muted)] font-mono tabular-nums shrink-0">
-                <span>{profileStats.total} Matches</span>
+                <span>
+                  {profileStats.total} {t('matchesCount')}
+                </span>
                 <span aria-hidden="true">·</span>
-                <span>Avg Acc: {profileStats.avgAcc !== null ? `${profileStats.avgAcc}%` : '—'}</span>
+                <span>
+                  {t('avgAcc')}: {profileStats.avgAcc !== null ? `${profileStats.avgAcc}%` : '—'}
+                </span>
                 {profileStats.bestElo && (
                   <>
                     <span aria-hidden="true">·</span>
-                    <span className="text-[var(--app-accent)] font-bold">Peak {profileStats.bestElo} Elo</span>
+                    <span className="text-[var(--app-accent)] font-bold">
+                      {t('peakElo')} {profileStats.bestElo} Elo
+                    </span>
                   </>
                 )}
               </div>
@@ -366,14 +378,12 @@ export const MainHub: React.FC<MainHubProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               {/* Left Column: Chess.com-Style Stacked Mode Selection Cards + Recent Matches */}
               <div className="lg:col-span-7 flex flex-col gap-6">
-                <section aria-label="Play modes" className="flex flex-col gap-3">
+                <section aria-label={t('selectMode')} className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
-                      Select Mode
+                      {t('selectMode')}
                     </h2>
-                    <span className="text-xs text-[var(--app-text-subtle)]">
-                      Powered by Stockfish WASM
-                    </span>
+                    <span className="text-xs text-[var(--app-text-subtle)]">{t('poweredByStockfish')}</span>
                   </div>
 
                   <div className="flex flex-col gap-3">
@@ -381,8 +391,8 @@ export const MainHub: React.FC<MainHubProps> = ({
                       [
                         {
                           id: 'stockfish' as GameMode,
-                          title: 'Play Stockfish',
-                          subtitle: 'Challenge Stockfish bots from 800 Club Novice to 3100 Max strength',
+                          title: t('modeStockfishTitle'),
+                          subtitle: t('modeStockfishDesc'),
                           meta: `${activeLevel.name} · ${activeLevel.elo} Elo`,
                           iconBg: 'rgba(129, 182, 76, 0.16)',
                           iconColor: '#81B64C',
@@ -390,24 +400,24 @@ export const MainHub: React.FC<MainHubProps> = ({
                         },
                         {
                           id: 'local' as GameMode,
-                          title: 'Pass & Play',
-                          subtitle: 'Play an over-the-board match with a friend on this device with live clocks',
-                          meta: '2 Players · Local Board',
+                          title: t('modeLocalTitle'),
+                          subtitle: t('modeLocalDesc'),
+                          meta: t('modeLocalMeta'),
                           iconBg: 'rgba(80, 137, 198, 0.16)',
                           iconColor: '#5089C6',
                           icon: Users,
                         },
                         {
                           id: 'analysis' as GameMode,
-                          title: 'Analysis & Match Rating',
-                          subtitle: 'Import any PGN or inspect a board for Accuracy %, Game Elo & move icons',
-                          meta: 'Game Review · MultiPV',
+                          title: t('modeAnalysisTitle'),
+                          subtitle: t('modeAnalysisDesc'),
+                          meta: t('modeAnalysisMeta'),
                           iconBg: 'rgba(27, 173, 166, 0.16)',
                           iconColor: '#1BADA6',
                           icon: Award,
                         },
                       ]
-                    ).map((card) => {
+                    ).map((card, idx) => {
                       const Icon = card.icon;
                       const active = matchSettings.mode === card.id;
                       return (
@@ -416,7 +426,8 @@ export const MainHub: React.FC<MainHubProps> = ({
                           type="button"
                           aria-pressed={active}
                           onClick={() => onChangeMatchSettings({ ...matchSettings, mode: card.id })}
-                          className={`w-full p-4 sm:p-5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-4 group ${
+                          style={{ '--stagger': idx } as React.CSSProperties}
+                          className={`w-full p-4 sm:p-5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-4 group anim-card-stagger anim-interactive ${
                             active
                               ? 'bg-[var(--app-surface)] border-[var(--app-accent)] shadow-sm'
                               : 'bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-border-strong)] hover:bg-[var(--app-surface-hover)]'
@@ -458,15 +469,18 @@ export const MainHub: React.FC<MainHubProps> = ({
                 </section>
 
                 {/* Recent Matches Strip with One-Click "Rate Match" */}
-                <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-3">
+                <section
+                  style={{ '--stagger': 3 } as React.CSSProperties}
+                  className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-3 anim-card-stagger"
+                >
                   <div className="flex items-center justify-between">
-                    <h2 className="text-sm font-bold text-[var(--app-text)]">Recent Matches</h2>
+                    <h2 className="text-sm font-bold text-[var(--app-text)]">{t('recentMatches')}</h2>
                     <button
                       type="button"
                       onClick={() => onChangeSection('profile')}
                       className="text-xs font-semibold text-[var(--app-accent)] hover:underline cursor-pointer"
                     >
-                      View All →
+                      {t('viewAll')} →
                     </button>
                   </div>
                   <div className="flex flex-col divide-y divide-[var(--app-border)]">
@@ -491,9 +505,9 @@ export const MainHub: React.FC<MainHubProps> = ({
                         <button
                           type="button"
                           onClick={() => onOpenMatchRating(m.pgn, `${m.whiteName} vs ${m.blackName}`)}
-                          className="px-3.5 py-2 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-accent)] hover:text-[var(--app-accent-fg)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text)] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                          className="px-3.5 py-2 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-accent)] hover:text-[var(--app-accent-fg)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text)] transition-colors whitespace-nowrap shrink-0 cursor-pointer anim-interactive"
                         >
-                          Rate Match
+                          {t('rateMatch')}
                         </button>
                       </div>
                     ))}
@@ -503,34 +517,37 @@ export const MainHub: React.FC<MainHubProps> = ({
 
               {/* Right Column: Sticky Chess.com-Style Match Setup & Launch Panel */}
               <div className="lg:col-span-5 lg:sticky lg:top-6">
-                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm">
+                <div
+                  key={`setup-${matchSettings.mode}`}
+                  className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm anim-view-enter"
+                >
                   {/* Panel Header */}
                   <div className="pb-4 border-b border-[var(--app-border)]">
                     <div className="text-xs font-semibold text-[var(--app-accent)]">
                       {matchSettings.mode === 'stockfish'
-                        ? 'Engine Match Setup'
+                        ? t('setupEngineLabel')
                         : matchSettings.mode === 'local'
-                          ? 'Local Match Setup'
-                          : 'Stockfish Game Review'}
+                          ? t('setupLocalLabel')
+                          : t('setupReviewLabel')}
                     </div>
                     <h2 className="text-lg font-extrabold text-[var(--app-text)] mt-0.5">
                       {matchSettings.mode === 'stockfish'
-                        ? 'Play Stockfish'
+                        ? t('modeStockfishTitle')
                         : matchSettings.mode === 'local'
-                          ? 'Pass & Play'
-                          : 'Analysis & Match Rating'}
+                          ? t('modeLocalTitle')
+                          : t('modeAnalysisTitle')}
                     </h2>
                   </div>
 
                   {matchSettings.mode === 'analysis' ? (
                     <>
                       <p className="text-xs text-[var(--app-text-muted)] leading-relaxed -mt-1">
-                        Paste a PGN to calculate White &amp; Black Accuracy %, Estimated Game Elo, Phase Ratings, and Chess.com-style move icons — or open an empty Stockfish Analysis Board.
+                        {t('analysisIntro')}
                       </p>
 
                       <form onSubmit={handleQuickRateSubmit} className="flex flex-col gap-3">
                         <label htmlFor="hub-pgn-rate" className="text-xs font-semibold text-[var(--app-text-muted)]">
-                          PGN to Rate (Optional)
+                          {t('pgnToRateOptional')}
                         </label>
                         <textarea
                           id="hub-pgn-rate"
@@ -548,17 +565,17 @@ export const MainHub: React.FC<MainHubProps> = ({
                         <div className="flex flex-col gap-2.5 pt-1">
                           <button
                             type="submit"
-                            className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-sm transition-colors shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer whitespace-nowrap"
+                            className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-sm transition-colors shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer whitespace-nowrap anim-interactive"
                           >
-                            Rate PGN Match
+                            {t('ratePgnMatch')}
                           </button>
                           <button
                             type="button"
                             data-start="true"
                             onClick={() => onOpenMatchRating()}
-                            className="w-full py-3 px-4 rounded-xl bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-bold text-sm transition-colors cursor-pointer whitespace-nowrap"
+                            className="w-full py-3 px-4 rounded-xl bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-bold text-sm transition-colors cursor-pointer whitespace-nowrap anim-interactive"
                           >
-                            Open Analysis Board
+                            {t('openAnalysisBoard')}
                           </button>
                         </div>
                       </form>
@@ -570,7 +587,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-semibold text-[var(--app-text-muted)]">
-                              Stockfish Engine Strength
+                              {t('stockfishStrength')}
                             </span>
                             <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)]">
                               {activeLevel.name} · {activeLevel.elo}
@@ -586,7 +603,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                                   onClick={() =>
                                     onChangeMatchSettings({ ...matchSettings, stockfishLevelId: lvl.id })
                                   }
-                                  className={`py-2.5 px-2.5 rounded-lg text-left border transition-colors cursor-pointer ${
+                                  className={`py-2.5 px-2.5 rounded-lg text-left border transition-colors cursor-pointer anim-interactive ${
                                     selected
                                       ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
                                       : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
@@ -604,7 +621,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                       {/* Time Control */}
                       <div>
                         <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
-                          Time Control
+                          {t('timeControl')}
                         </span>
                         <div className="grid grid-cols-4 gap-1.5">
                           {TIME_CONTROLS.map((tc) => {
@@ -614,13 +631,15 @@ export const MainHub: React.FC<MainHubProps> = ({
                                 key={tc.id}
                                 type="button"
                                 onClick={() => onChangeMatchSettings({ ...matchSettings, timeControlId: tc.id })}
-                                className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap cursor-pointer ${
+                                className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap truncate cursor-pointer anim-interactive ${
+                                  tc.id === 'unlimited' ? 'col-span-2' : ''
+                                } ${
                                   selected
                                     ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
                                     : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                                 }`}
                               >
-                                {tc.label}
+                                {tc.id === 'unlimited' ? t('unlimited') : tc.label}
                               </button>
                             );
                           })}
@@ -630,20 +649,20 @@ export const MainHub: React.FC<MainHubProps> = ({
                       {/* Side Selection */}
                       {matchSettings.mode === 'stockfish' && (
                         <div className="flex items-center justify-between gap-3">
-                          <span className="text-xs font-semibold text-[var(--app-text-muted)]">Play As</span>
+                          <span className="text-xs font-semibold text-[var(--app-text-muted)]">{t('playAs')}</span>
                           <div className="flex items-center gap-1.5">
                             {(
                               [
-                                { id: 'w', label: 'White' },
-                                { id: 'random', label: 'Random' },
-                                { id: 'b', label: 'Black' },
+                                { id: 'w', label: t('white') },
+                                { id: 'random', label: t('random') },
+                                { id: 'b', label: t('black') },
                               ] as { id: PlayerSideChoice; label: string }[]
                             ).map((s) => (
                               <button
                                 key={s.id}
                                 type="button"
                                 onClick={() => onChangeMatchSettings({ ...matchSettings, playerSide: s.id })}
-                                className={`px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                                className={`px-3.5 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer anim-interactive ${
                                   matchSettings.playerSide === s.id
                                     ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
                                     : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
@@ -660,10 +679,12 @@ export const MainHub: React.FC<MainHubProps> = ({
                         type="button"
                         data-start="true"
                         onClick={() => onStartMatch()}
-                        className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] active:scale-[0.99] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1"
+                        className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
                       >
                         <Swords className="w-4 h-4" />
-                        <span>{matchSettings.mode === 'stockfish' ? 'Play Stockfish' : 'Start Pass & Play'}</span>
+                        <span>
+                          {matchSettings.mode === 'stockfish' ? t('startPlayStockfish') : t('startPassPlay')}
+                        </span>
                       </button>
                     </>
                   )}
@@ -685,14 +706,16 @@ export const MainHub: React.FC<MainHubProps> = ({
 
         {/* ================= PROFILE VIEW ================= */}
         {section === 'profile' && (
-          <div className="max-w-[920px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-7" data-testid="profile-view">
+          <div
+            key="hub-profile"
+            className="max-w-[920px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-7 anim-view-enter"
+            data-testid="profile-view"
+          >
             <div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--app-text)]">
-                Player Profile
+                {t('profileTitle')}
               </h1>
-              <p className="text-sm text-[var(--app-text-muted)] mt-1">
-                Manage your chess identity, upload a profile photo, and inspect your Stockfish-rated match archive.
-              </p>
+              <p className="text-sm text-[var(--app-text-muted)] mt-1">{t('profileSubtitle')}</p>
             </div>
 
             {/* Identity Editor Card */}
@@ -702,7 +725,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
-                  aria-label="Upload profile photo"
+                  aria-label={t('uploadPhoto')}
                   onChange={handleAvatarFileChange}
                   className="hidden"
                 />
@@ -710,8 +733,8 @@ export const MainHub: React.FC<MainHubProps> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  title="Click to upload profile photo"
-                  className="relative group w-24 h-24 rounded-2xl overflow-hidden shadow-md border border-[var(--app-border-strong)] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]"
+                  title={t('uploadPhoto')}
+                  className="relative group w-24 h-24 rounded-2xl overflow-hidden shadow-md border border-[var(--app-border-strong)] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)] anim-interactive"
                 >
                   {profile.avatarImage ? (
                     <img
@@ -730,7 +753,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                   )}
                   <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 text-white text-[11px] font-bold">
                     <Camera className="w-5 h-5" />
-                    <span>Change</span>
+                    <span>{t('changePhoto')}</span>
                   </span>
                 </button>
 
@@ -738,21 +761,21 @@ export const MainHub: React.FC<MainHubProps> = ({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] transition-colors cursor-pointer whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-xs font-semibold text-[var(--app-text)] transition-colors cursor-pointer whitespace-nowrap anim-interactive"
                   >
                     <Upload className="w-3.5 h-3.5 text-[var(--app-accent)]" />
-                    <span>Upload Photo</span>
+                    <span>{t('uploadPhoto')}</span>
                   </button>
                   {profile.avatarImage && (
                     <button
                       type="button"
-                      aria-label="Remove profile photo"
-                      title="Remove Photo"
+                      aria-label={t('removePhoto')}
+                      title={t('removePhoto')}
                       onClick={() => {
                         onUpdateProfile({ avatarImage: null });
                         setAvatarUploadError(null);
                       }}
-                      className="p-1.5 rounded-lg bg-[var(--app-surface-2)] hover:bg-[#C94A4A]/20 border border-[var(--app-border-strong)] text-[var(--app-text-muted)] hover:text-[#E04F4F] transition-colors cursor-pointer"
+                      className="p-1.5 rounded-lg bg-[var(--app-surface-2)] hover:bg-[#C94A4A]/20 border border-[var(--app-border-strong)] text-[var(--app-text-muted)] hover:text-[#E04F4F] transition-colors cursor-pointer anim-interactive"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -771,7 +794,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                         type="button"
                         aria-label={`Select avatar color ${hex}`}
                         onClick={() => onUpdateProfile({ avatarColor: hex })}
-                        className={`w-5 h-5 rounded-full cursor-pointer border-2 ${
+                        className={`w-5 h-5 rounded-full cursor-pointer border-2 anim-interactive ${
                           profile.avatarColor === hex ? 'border-[var(--app-text)] scale-110' : 'border-transparent'
                         }`}
                         style={{ backgroundColor: hex }}
@@ -795,13 +818,13 @@ export const MainHub: React.FC<MainHubProps> = ({
               >
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="profile-name" className="text-xs font-bold text-[var(--app-text-muted)]">
-                    Display Name
+                    {t('displayNameLabel')}
                   </label>
                   <input
                     id="profile-name"
                     type="text"
                     maxLength={40}
-                    placeholder="Enter display name"
+                    placeholder={t('displayNamePlaceholder')}
                     value={profile.displayName}
                     onChange={(e) => onUpdateProfile({ displayName: e.target.value })}
                     onBlur={() => {
@@ -815,7 +838,7 @@ export const MainHub: React.FC<MainHubProps> = ({
 
                 <div className="flex flex-col gap-1.5">
                   <label htmlFor="profile-title" className="text-xs font-bold text-[var(--app-text-muted)]">
-                    Player Title
+                    {t('playerTitleLabel')}
                   </label>
                   <input
                     id="profile-title"
@@ -828,7 +851,7 @@ export const MainHub: React.FC<MainHubProps> = ({
 
                 <div className="sm:col-span-2 flex flex-col gap-1.5">
                   <label htmlFor="profile-bio" className="text-xs font-bold text-[var(--app-text-muted)]">
-                    Bio
+                    {t('bioLabel')}
                   </label>
                   <input
                     id="profile-bio"
@@ -841,13 +864,13 @@ export const MainHub: React.FC<MainHubProps> = ({
 
                 <div className="sm:col-span-2 flex items-center justify-between">
                   <span className="text-xs text-[var(--app-accent)] font-semibold">
-                    {profileSavedToast ? 'Profile saved locally.' : ''}
+                    {profileSavedToast ? t('profileSavedLocally') : ''}
                   </span>
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] text-xs font-extrabold cursor-pointer"
+                    className="px-4 py-2 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] text-xs font-extrabold cursor-pointer anim-interactive"
                   >
-                    Save Profile
+                    {t('saveProfile')}
                   </button>
                 </div>
               </form>
@@ -856,23 +879,24 @@ export const MainHub: React.FC<MainHubProps> = ({
             {/* Stats Row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: 'Matches Played', value: String(profileStats.total) },
+                { label: t('matchesPlayed'), value: String(profileStats.total) },
                 {
-                  label: 'Record (W-D-L)',
+                  label: t('recordWDL'),
                   value: `${profileStats.wins}-${profileStats.draws}-${profileStats.losses}`,
                 },
                 {
-                  label: 'Avg Accuracy',
+                  label: t('avgAccuracy'),
                   value: profileStats.avgAcc !== null ? `${profileStats.avgAcc}%` : '—',
                 },
                 {
-                  label: 'Peak Game Elo',
+                  label: t('peakGameElo'),
                   value: profileStats.bestElo !== null ? String(profileStats.bestElo) : '—',
                 },
-              ].map((stat) => (
+              ].map((stat, idx) => (
                 <div
                   key={stat.label}
-                  className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-4"
+                  style={{ '--stagger': idx } as React.CSSProperties}
+                  className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-4 anim-card-stagger"
                 >
                   <div className="text-xs text-[var(--app-text-muted)]">{stat.label}</div>
                   <div className="text-2xl font-mono font-extrabold tabular-nums text-[var(--app-text)] mt-1">
@@ -885,8 +909,8 @@ export const MainHub: React.FC<MainHubProps> = ({
             {/* Full Saved Match Archive */}
             <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold text-[var(--app-text)]">Match History</h2>
-                <span className="text-xs text-[var(--app-text-muted)]">Click any match to run Stockfish Rating</span>
+                <h2 className="text-base font-bold text-[var(--app-text)]">{t('matchHistory')}</h2>
+                <span className="text-xs text-[var(--app-text-muted)]">{t('clickToRateHint')}</span>
               </div>
               <div className="flex flex-col divide-y divide-[var(--app-border)]">
                 {savedMatches.map((m) => (
@@ -902,11 +926,15 @@ export const MainHub: React.FC<MainHubProps> = ({
                         <span aria-hidden="true">·</span>
                         <span className="font-sans">{m.openingName}</span>
                         <span aria-hidden="true">·</span>
-                        <span>{m.movesCount} moves</span>
+                        <span>
+                          {m.movesCount} {t('movesUnit')}
+                        </span>
                         {typeof m.whiteGameElo === 'number' && (
                           <>
                             <span aria-hidden="true">·</span>
-                            <span className="text-[var(--app-accent)]">Est. {m.whiteGameElo} Elo</span>
+                            <span className="text-[var(--app-accent)]">
+                              {t('estEloPrefix')} {m.whiteGameElo} Elo
+                            </span>
                           </>
                         )}
                       </div>
@@ -915,9 +943,9 @@ export const MainHub: React.FC<MainHubProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenMatchRating(m.pgn, `${m.whiteName} vs ${m.blackName}`)}
-                      className="px-3.5 py-2 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] text-xs font-extrabold transition-colors flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer"
+                      className="px-3.5 py-2 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] text-xs font-extrabold transition-colors flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer anim-interactive"
                     >
-                      <span>Rate Match</span>
+                      <span>{t('rateMatch')}</span>
                       <ChevronRight className="w-3.5 h-3.5" />
                     </button>
                   </div>

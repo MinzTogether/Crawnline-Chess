@@ -1,4 +1,7 @@
 import type { BoardThemeId } from './chess';
+import type { AppLanguage } from '../i18n/translations';
+
+export type AnimationLevelId = 'off' | 'subtle' | 'smooth' | 'expressive';
 
 export type AppThemeId =
   | 'dark-slate'
@@ -564,6 +567,10 @@ export interface AppPreferences {
   appIcon: AppIconId;
   boardTheme: BoardThemeId;
   pieceStyle: PieceStyleId;
+  language: AppLanguage;
+  animationLevel: AnimationLevelId;
+  pieceMoveAnimation: boolean;
+  uiTransitions: boolean;
   showCoordinates: boolean;
   showLegalMoves: boolean;
   showEvalBar: boolean;
@@ -577,6 +584,10 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   appIcon: 'crown',
   boardTheme: 'tournament',
   pieceStyle: 'classic',
+  language: 'en',
+  animationLevel: 'smooth',
+  pieceMoveAnimation: true,
+  uiTransitions: true,
   showCoordinates: true,
   showLegalMoves: true,
   showEvalBar: true,

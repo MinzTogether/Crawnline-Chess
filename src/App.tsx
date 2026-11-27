@@ -41,6 +41,8 @@ import { ChessBoard } from './components/ChessBoard';
 import { MobileMoveBar } from './components/MobileMoveBar';
 import { PlayerBar } from './components/PlayerBar';
 import { RightPanel, type RightPanelTab } from './components/RightPanel';
+import { LanguageProvider } from './i18n/LanguageContext';
+import { translate } from './i18n/translations';
 import { MainHub, type HubSection } from './components/MainHub';
 import { GameOverModal, NewMatchModal, PauseModal } from './components/GameModals';
 
@@ -145,9 +147,14 @@ export default function App() {
     depth: 0,
   });
 
-  // Apply App Theme & Browser Favicon whenever preferences change
+  // Apply App Theme, Animation channels, Language attribute & Browser Favicon whenever preferences change
   useEffect(() => {
-    document.documentElement.dataset.appTheme = preferences.appTheme;
+    const root = document.documentElement;
+    root.dataset.appTheme = preferences.appTheme;
+    root.dataset.animationLevel = preferences.animationLevel;
+    root.dataset.uiTransitions = preferences.uiTransitions ? 'on' : 'off';
+    root.dataset.pieceMotion = preferences.pieceMoveAnimation ? 'on' : 'off';
+    root.lang = preferences.language;
     syncBrowserFavicon(preferences.appIcon);
     savePreferences(preferences);
   }, [preferences]);
@@ -958,19 +965,21 @@ export default function App() {
   // Main Chess.com-style Hub (Home, Settings, Profile) before choosing a play mode
   if (appState === 'title') {
     return (
-      <MainHub
-        section={hubSection}
-        onChangeSection={setHubSection}
-        preferences={preferences}
-        onUpdatePreferences={updatePreferences}
-        profile={profile}
-        onUpdateProfile={updateProfile}
-        savedMatches={savedMatches}
-        matchSettings={matchSettings}
-        onChangeMatchSettings={setMatchSettings}
-        onStartMatch={startMatch}
-        onOpenMatchRating={handleOpenMatchRating}
-      />
+      <LanguageProvider lang={preferences.language}>
+        <MainHub
+          section={hubSection}
+          onChangeSection={setHubSection}
+          preferences={preferences}
+          onUpdatePreferences={updatePreferences}
+          profile={profile}
+          onUpdateProfile={updateProfile}
+          savedMatches={savedMatches}
+          matchSettings={matchSettings}
+          onChangeMatchSettings={setMatchSettings}
+          onStartMatch={startMatch}
+          onOpenMatchRating={handleOpenMatchRating}
+        />
+      </LanguageProvider>
     );
   }
 
@@ -994,58 +1003,59 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col">
-      {/* Compact Arena Utility Strip */}
-      <div className="w-full max-w-[1320px] mx-auto px-4 sm:px-6 pt-3 pb-1 flex items-center justify-between gap-4">
-        <button
-          type="button"
-          onClick={() => returnToHub('home')}
-          className="flex items-center gap-2.5 text-left group cursor-pointer"
-        >
-          <AppLogoIcon iconId={preferences.appIcon} className="w-8 h-8 shrink-0" />
-          <span className="text-base font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">
-            Crownline Chess
-          </span>
-          <span className="hidden sm:inline text-xs text-[var(--app-text-muted)] whitespace-nowrap">
-            ·{' '}
-            {activeMode === 'stockfish'
-              ? `vs Stockfish ${activeLevel.elo}`
-              : activeMode === 'local'
-                ? 'Pass & Play'
-                : 'Analysis & Match Rating'}
-          </span>
-        </button>
-
-        {/* Compact Utility Controls */}
-        <div className="flex items-center gap-1.5 shrink-0">
+    <LanguageProvider lang={preferences.language}>
+      <div className="min-h-screen w-full bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col anim-view-enter">
+        {/* Compact Arena Utility Strip */}
+        <div className="w-full max-w-[1320px] mx-auto px-4 sm:px-6 pt-3 pb-1 flex items-center justify-between gap-4">
           <button
             type="button"
-            tabIndex={-1}
-            aria-label="Home lobby"
-            title="Home Lobby"
-            onClick={(e) => {
-              e.currentTarget.blur();
-              returnToHub('home');
-            }}
-            className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer"
+            onClick={() => returnToHub('home')}
+            className="flex items-center gap-2.5 text-left group cursor-pointer anim-interactive"
           >
-            <Home className="w-3.5 h-3.5" />
+            <AppLogoIcon iconId={preferences.appIcon} className="w-8 h-8 shrink-0" />
+            <span className="text-base font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">
+              Crownline Chess
+            </span>
+            <span className="hidden sm:inline text-xs text-[var(--app-text-muted)] whitespace-nowrap">
+              ·{' '}
+              {activeMode === 'stockfish'
+                ? `${translate(preferences.language, 'arenaVsStockfish')} ${activeLevel.elo}`
+                : activeMode === 'local'
+                  ? translate(preferences.language, 'modeLocalTitle')
+                  : translate(preferences.language, 'modeAnalysisTitle')}
+            </span>
           </button>
 
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-label="New match"
-            title="New Match"
-            onClick={(e) => {
-              e.currentTarget.blur();
-              setShowNewMatchModal(true);
-            }}
-            className="h-8 px-2.5 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
-          >
-            <Plus className="w-3.5 h-3.5 text-[var(--app-accent)]" />
-            <span className="hidden sm:inline">New</span>
-          </button>
+          {/* Compact Utility Controls */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={translate(preferences.language, 'navHome')}
+              title={translate(preferences.language, 'navHome')}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                returnToHub('home');
+              }}
+              className="w-8 h-8 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[var(--app-text)] flex items-center justify-center transition-colors cursor-pointer anim-interactive"
+            >
+              <Home className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={translate(preferences.language, 'newMatchTitle')}
+              title={translate(preferences.language, 'newMatchTitle')}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                setShowNewMatchModal(true);
+              }}
+              className="h-8 px-2.5 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap anim-interactive"
+            >
+              <Plus className="w-3.5 h-3.5 text-[var(--app-accent)]" />
+              <span className="hidden sm:inline">{translate(preferences.language, 'arenaNewBtn')}</span>
+            </button>
 
           <button
             type="button"
@@ -1283,14 +1293,15 @@ export default function App() {
         />
       )}
 
-      {showNewMatchModal && (
-        <NewMatchModal
-          settings={matchSettings}
-          onChangeSettings={setMatchSettings}
-          onConfirm={() => startMatch()}
-          onCancel={() => setShowNewMatchModal(false)}
-        />
-      )}
-    </div>
+        {showNewMatchModal && (
+          <NewMatchModal
+            settings={matchSettings}
+            onChangeSettings={setMatchSettings}
+            onConfirm={() => startMatch()}
+            onCancel={() => setShowNewMatchModal(false)}
+          />
+        )}
+      </div>
+    </LanguageProvider>
   );
 }

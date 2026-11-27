@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Award, ChevronRight, Sparkles, Upload } from 'lucide-react';
 import { CLASSIFICATION_META, type EvalScore, type MoveRecord } from '../types/chess';
 import { buildMatchRatingReport } from '../engine/matchRating';
+import { useI18n } from '../i18n/LanguageContext';
 import { EvalGraph } from './EvalGraph';
 import { MoveBadge } from './MoveBadge';
 
@@ -30,6 +31,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
   onSelectPly,
   onImportAndRatePgn,
 }) => {
+  const { t, getClassificationLabel } = useI18n();
   const report = useMemo(() => buildMatchRatingReport(moves), [moves]);
   const [showPgnBox, setShowPgnBox] = useState(false);
   const [pgnDraft, setPgnDraft] = useState('');
@@ -47,16 +49,16 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
     }
   };
 
-  const rows: { key: keyof typeof CLASSIFICATION_META; label: string }[] = [
-    { key: 'brilliant', label: 'Brilliant' },
-    { key: 'great', label: 'Great' },
-    { key: 'best', label: 'Best' },
-    { key: 'excellent', label: 'Excellent' },
-    { key: 'book', label: 'Book' },
-    { key: 'good', label: 'Good' },
-    { key: 'inaccuracy', label: 'Inaccuracy' },
-    { key: 'mistake', label: 'Mistake' },
-    { key: 'blunder', label: 'Blunder' },
+  const rows: Array<keyof typeof CLASSIFICATION_META> = [
+    'brilliant',
+    'great',
+    'best',
+    'excellent',
+    'book',
+    'good',
+    'inaccuracy',
+    'mistake',
+    'blunder',
   ];
 
   return (
@@ -66,7 +68,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
         <div>
           <div className="flex items-center gap-1.5">
             <Award className="w-4 h-4 text-[var(--app-accent)] shrink-0" />
-            <h2 className="text-sm font-bold text-[var(--app-text)]">Stockfish Match Rating</h2>
+            <h2 className="text-sm font-bold text-[var(--app-text)]">{t('matchRatingTitle')}</h2>
           </div>
           <p className="text-xs text-[var(--app-text-muted)] mt-1 leading-relaxed">{report.summaryHeadline}</p>
         </div>
@@ -74,10 +76,10 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
           type="button"
           onClick={onRunGameReview}
           disabled={moves.length === 0 || isReviewing}
-          className="px-3 py-1.5 rounded-md bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] disabled:opacity-40 text-[var(--app-accent-fg)] text-xs font-extrabold transition-colors cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1"
+          className="px-3 py-1.5 rounded-md bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] disabled:opacity-40 text-[var(--app-accent-fg)] text-xs font-extrabold transition-colors cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1 anim-interactive"
         >
           <Sparkles className="w-3.5 h-3.5" />
-          <span>{isReviewing ? `${reviewProgress}%` : report.isComplete ? 'Re-Rate' : 'Rate Match'}</span>
+          <span>{isReviewing ? `${reviewProgress}%` : report.isComplete ? t('reRate') : t('rateMatch')}</span>
         </button>
       </div>
 
@@ -85,7 +87,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
       {isReviewing && (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between text-xs text-[var(--app-text-muted)] font-mono tabular-nums">
-            <span>Stockfish evaluating move by move…</span>
+            <span>{t('evaluatingMoves')}</span>
             <span>{reviewProgress}%</span>
           </div>
           <div className="w-full h-2 bg-[var(--app-surface-2)] rounded-full overflow-hidden">
@@ -115,7 +117,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
             {report.white.accuracy !== null ? `${report.white.accuracy.toFixed(1)}%` : '—'}
           </div>
           <div className="flex items-center justify-between text-[11px] text-[var(--app-text-muted)] font-mono tabular-nums pt-1 border-t border-[var(--app-border)]">
-            <span>Game Elo</span>
+            <span>{t('gameElo')}</span>
             <span className="font-bold text-[var(--app-text)]">
               {report.white.estimatedElo !== null ? report.white.estimatedElo : '—'}
             </span>
@@ -133,7 +135,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
             {report.black.accuracy !== null ? `${report.black.accuracy.toFixed(1)}%` : '—'}
           </div>
           <div className="flex items-center justify-between text-[11px] text-[var(--app-text-muted)] font-mono tabular-nums pt-1 border-t border-[var(--app-border)]">
-            <span>Game Elo</span>
+            <span>{t('gameElo')}</span>
             <span className="font-bold text-[var(--app-text)]">
               {report.black.estimatedElo !== null ? report.black.estimatedElo : '—'}
             </span>
@@ -144,13 +146,13 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
       {/* Phase-by-Phase Ratings */}
       {report.analyzedPlies > 0 && (
         <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-xl p-3 flex flex-col gap-2">
-          <span className="text-xs font-bold text-[var(--app-text)]">Phase Accuracy</span>
+          <span className="text-xs font-bold text-[var(--app-text)]">{t('phaseAccuracy')}</span>
           <div className="grid grid-cols-3 gap-2 text-center font-mono tabular-nums text-xs">
             {(
               [
-                { label: 'Opening', w: report.white.openingAccuracy, b: report.black.openingAccuracy },
-                { label: 'Middlegame', w: report.white.middlegameAccuracy, b: report.black.middlegameAccuracy },
-                { label: 'Endgame', w: report.white.endgameAccuracy, b: report.black.endgameAccuracy },
+                { label: t('phaseOpening'), w: report.white.openingAccuracy, b: report.black.openingAccuracy },
+                { label: t('phaseMiddlegame'), w: report.white.middlegameAccuracy, b: report.black.middlegameAccuracy },
+                { label: t('phaseEndgame'), w: report.white.endgameAccuracy, b: report.black.endgameAccuracy },
               ] as const
             ).map((phase) => (
               <div key={phase.label} className="bg-[var(--app-surface)] rounded-lg p-2 border border-[var(--app-border)]">
@@ -170,11 +172,11 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
       {report.analyzedPlies > 0 && (
         <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-xl p-3 flex flex-col gap-1">
           <div className="grid grid-cols-[1fr_44px_44px] text-[11px] text-[var(--app-text-muted)] pb-1.5 border-b border-[var(--app-border)]">
-            <span>Move Quality</span>
-            <span className="text-right">White</span>
-            <span className="text-right">Black</span>
+            <span>{t('moveQuality')}</span>
+            <span className="text-right">{t('white')}</span>
+            <span className="text-right">{t('black')}</span>
           </div>
-          {rows.map(({ key, label }) => {
+          {rows.map((key) => {
             const wCount = report.white.counts[key];
             const bCount = report.black.counts[key];
             if (wCount === 0 && bCount === 0 && (key === 'brilliant' || key === 'great')) return null;
@@ -186,7 +188,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
               >
                 <span className="font-sans font-semibold flex items-center gap-2 text-[var(--app-text)]">
                   <MoveBadge classification={key} variant="legend" showTitle={false} />
-                  <span style={{ color: meta.color }}>{label}</span>
+                  <span style={{ color: meta.color }}>{getClassificationLabel(key)}</span>
                 </span>
                 <span className="text-right font-bold text-[var(--app-text)]">{wCount}</span>
                 <span className="text-right font-bold text-[var(--app-text)]">{bCount}</span>
@@ -199,7 +201,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
       {/* Key Moments Navigator */}
       {report.keyMoments.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <h3 className="text-xs font-bold text-[var(--app-text)]">Key Turning Points</h3>
+          <h3 className="text-xs font-bold text-[var(--app-text)]">{t('keyTurningPoints')}</h3>
           {report.keyMoments.map((km) => {
             const meta = CLASSIFICATION_META[km.classification];
             const active = viewPly === km.ply;
@@ -208,7 +210,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
                 key={km.ply}
                 type="button"
                 onClick={() => onSelectPly(km.ply)}
-                className={`w-full text-left p-2.5 rounded-lg border transition-colors flex items-center justify-between gap-2 cursor-pointer ${
+                className={`w-full text-left p-2.5 rounded-lg border transition-colors flex items-center justify-between gap-2 cursor-pointer anim-interactive ${
                   active
                     ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)]'
                     : 'bg-[var(--app-surface-2)] border-[var(--app-border)] hover:bg-[var(--app-surface-hover)]'
@@ -223,7 +225,7 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
                         {km.color === 'w' ? '.' : '...'} {km.san}
                       </span>
                       <span className="text-[11px] font-sans font-normal text-[var(--app-text-muted)]">
-                        {meta.label}
+                        {getClassificationLabel(km.classification)}
                       </span>
                     </div>
                     <p className="text-[11px] text-[var(--app-text-muted)] truncate mt-0.5">{km.headline}</p>
@@ -242,15 +244,15 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
           <button
             type="button"
             onClick={() => setShowPgnBox(true)}
-            className="w-full py-2 px-3 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            className="w-full py-2 px-3 rounded-lg bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center justify-center gap-1.5 transition-colors cursor-pointer anim-interactive"
           >
             <Upload className="w-3.5 h-3.5 text-[var(--app-accent)]" />
-            <span>Paste PGN to Rate Another Match</span>
+            <span>{t('pastePgnAnother')}</span>
           </button>
         ) : (
           <form onSubmit={handlePgnRateSubmit} className="flex flex-col gap-2">
             <label htmlFor="rate-pgn-input" className="text-xs font-bold text-[var(--app-text)]">
-              Paste Match PGN
+              {t('pasteMatchPgn')}
             </label>
             <textarea
               id="rate-pgn-input"
@@ -271,15 +273,15 @@ export const MatchRatingPanel: React.FC<MatchRatingPanelProps> = ({
                   setShowPgnBox(false);
                   setPgnError(null);
                 }}
-                className="py-2 rounded-lg bg-[var(--app-surface-2)] text-xs font-semibold text-[var(--app-text-muted)] cursor-pointer"
+                className="py-2 rounded-lg bg-[var(--app-surface-2)] text-xs font-semibold text-[var(--app-text-muted)] cursor-pointer anim-interactive"
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 type="submit"
-                className="py-2 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] text-xs font-extrabold cursor-pointer"
+                className="py-2 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] text-xs font-extrabold cursor-pointer anim-interactive"
               >
-                Load &amp; Rate
+                {t('analyzeAndRate')}
               </button>
             </div>
           </form>

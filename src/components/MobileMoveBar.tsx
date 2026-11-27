@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, ListOrdered } from 'lucide-react';
 import { type MoveRecord, type OpeningInfo } from '../types/chess';
+import { useI18n } from '../i18n/LanguageContext';
 import { MoveBadge } from './MoveBadge';
 
 interface MobileMoveBarProps {
@@ -22,6 +23,7 @@ export const MobileMoveBar: React.FC<MobileMoveBarProps> = ({
   onSelectPly,
   onJumpToMoveList,
 }) => {
+  const { t } = useI18n();
   const scrollerRef = useRef<HTMLDivElement>(null);
   const activeChipRef = useRef<HTMLButtonElement | null>(null);
 
@@ -55,7 +57,7 @@ export const MobileMoveBar: React.FC<MobileMoveBarProps> = ({
       >
         {moves.length === 0 ? (
           <span className="text-xs text-[var(--app-text-muted)] truncate">
-            {opening ? `${opening.eco} · ${opening.name}` : 'No moves yet — tap a piece to play'}
+            {opening ? `${opening.eco} · ${opening.name}` : t('noMovesYet')}
           </span>
         ) : (
           <>

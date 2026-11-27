@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { Color } from 'chess.js';
 import type { EvalScore } from '../types/chess';
 import { evalToBarPercent, evalToWhiteWinProbability, formatEvalScore } from '../engine/uciParser';
+import { useI18n } from '../i18n/LanguageContext';
 
 interface EvalBarProps {
   score: EvalScore | null;
@@ -23,6 +24,7 @@ export const EvalBar: React.FC<EvalBarProps> = ({
   depth = 0,
   isStabilizing = false,
 }) => {
+  const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
 
   const whiteBarPct = evalToBarPercent(score);
@@ -42,11 +44,11 @@ export const EvalBar: React.FC<EvalBarProps> = ({
 
   const advantageSummary = isMate
     ? score!.value === 0
-      ? 'Checkmate'
-      : `${score!.value > 0 ? 'White' : 'Black'} Mate in ${Math.abs(score!.value)}`
+      ? t('evalCheckmate')
+      : `${score!.value > 0 ? t('white') : t('black')} ${t('evalMateIn')} ${Math.abs(score!.value)}`
     : Math.abs(score?.value ?? 0) < 20
-      ? 'Equal position'
-      : `${whiteAhead ? 'White' : 'Black'} ${preciseText}`;
+      ? t('evalEqual')
+      : `${whiteAhead ? t('white') : t('black')} ${preciseText}`;
 
   return (
     <div
@@ -54,7 +56,7 @@ export const EvalBar: React.FC<EvalBarProps> = ({
       data-testid="eval-bar"
       data-eval-percent={Math.round(whiteBarPct)}
       data-eval-depth={depth}
-      aria-label={`Stockfish evaluation ${advantageSummary}`}
+      aria-label={`Stockfish ${advantageSummary}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onFocus={() => setHovered(true)}
@@ -65,7 +67,7 @@ export const EvalBar: React.FC<EvalBarProps> = ({
       <div className="relative w-full h-full rounded-[6px] overflow-hidden border border-white/15 shadow-[inset_0_1px_2px_rgba(0,0,0,0.45),0_8px_22px_rgba(0,0,0,0.3)] flex flex-col justify-between bg-gradient-to-b from-[#2F2E2B] via-[#242320] to-[#1A1917]">
         {/* White advantage fill — GPU-composited scaleY with smooth stabilized easing */}
         <div
-          className="absolute inset-0 will-change-transform transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+          className="absolute inset-0 will-change-transform anim-eval-fill motion-reduce:transition-none"
           style={{
             transform: `scaleY(${whiteScale})`,
             transformOrigin: orientation === 'w' ? 'bottom center' : 'top center',
@@ -82,7 +84,7 @@ export const EvalBar: React.FC<EvalBarProps> = ({
         {/* Dynamic boundary seam line at exact White/Black split */}
         {whiteBarPct > 2 && whiteBarPct < 98 && (
           <div
-            className={`absolute inset-x-0 h-[1.5px] z-10 pointer-events-none transition-[top,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            className={`absolute inset-x-0 h-[1.5px] z-10 pointer-events-none anim-eval-seam ${
               isMate
                 ? 'bg-[var(--app-accent)] opacity-95'
                 : isStabilizing
@@ -151,11 +153,11 @@ export const EvalBar: React.FC<EvalBarProps> = ({
       {hovered && (
         <div
           role="tooltip"
-          className="hidden sm:flex flex-col gap-0.5 absolute left-full top-1/2 -translate-y-1/2 ml-2.5 z-40 px-2.5 py-2 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border-strong)] shadow-xl whitespace-nowrap pointer-events-none"
+          className="hidden sm:flex flex-col gap-0.5 absolute left-full top-1/2 -translate-y-1/2 ml-2.5 z-40 px-2.5 py-2 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border-strong)] shadow-xl whitespace-nowrap pointer-events-none anim-tooltip-enter"
         >
           <span className="text-[11px] font-bold text-[var(--app-text)]">{advantageSummary}</span>
           <span className="text-[10px] font-mono tabular-nums text-[var(--app-text-muted)]">
-            White {whiteWinProb}% · Black {100 - whiteWinProb}%
+            {t('white')} {whiteWinProb}% · {t('black')} {100 - whiteWinProb}%
             {depth > 0 ? ` · d${depth}` : ''}
           </span>
         </div>

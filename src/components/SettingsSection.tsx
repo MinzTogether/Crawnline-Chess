@@ -4,22 +4,37 @@ import {
   Check,
   ChevronRight,
   Crown,
+  Globe,
   Grid2x2,
   Palette,
+  Play,
   SlidersHorizontal,
   Sparkles,
+  Wand2,
 } from 'lucide-react';
 import { BOARD_THEMES, type BoardThemeCategory, type BoardThemeId } from '../types/chess';
 import {
   APP_THEMES,
   PIECE_STYLES,
+  type AnimationLevelId,
   type AppPreferences,
   type PieceStyleId,
 } from '../types/preferences';
+import { LANGUAGE_OPTIONS } from '../i18n/translations';
+import { useI18n } from '../i18n/LanguageContext';
 import { APP_ICONS, AppLogoIcon } from './AppIcons';
 import { ChessPiece } from './ChessPieces';
+import { MoveBadge } from './MoveBadge';
 
-export type SettingsSubPage = 'root' | 'app-theme' | 'app-icon' | 'board-theme' | 'piece-style' | 'gameplay';
+export type SettingsSubPage =
+  | 'root'
+  | 'app-theme'
+  | 'app-icon'
+  | 'board-theme'
+  | 'piece-style'
+  | 'animations'
+  | 'language'
+  | 'gameplay';
 
 interface SettingsSectionProps {
   subPage: SettingsSubPage;
@@ -49,19 +64,32 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
   preferences,
   onUpdatePreferences,
 }) => {
+  const { t } = useI18n();
   const [themeFilter, setThemeFilter] = useState<'all' | 'chesscom' | 'dark' | 'light'>('all');
   const [boardCategoryFilter, setBoardCategoryFilter] = useState<'All' | BoardThemeCategory>('All');
+  const [previewStep, setPreviewStep] = useState<number>(0);
 
-  const activeTheme = APP_THEMES.find((t) => t.id === preferences.appTheme) ?? APP_THEMES[0];
-  const activeIcon = APP_ICONS.find((i) => i.id === preferences.appIcon) ?? APP_ICONS[0];
+  const activeTheme = APP_THEMES.find((item) => item.id === preferences.appTheme) ?? APP_THEMES[0];
+  const activeIcon = APP_ICONS.find((item) => item.id === preferences.appIcon) ?? APP_ICONS[0];
   const activeBoard = BOARD_THEMES[preferences.boardTheme] ?? BOARD_THEMES.tournament;
   const activePiece = PIECE_STYLES[preferences.pieceStyle] ?? PIECE_STYLES.classic;
+  const activeLangOption =
+    LANGUAGE_OPTIONS.find((item) => item.id === preferences.language) ?? LANGUAGE_OPTIONS[1];
 
-  const chessComThemes = APP_THEMES.filter((t) => t.isChessCom);
-  const darkThemes = APP_THEMES.filter((t) => !t.isLight && !t.isChessCom);
-  const lightThemes = APP_THEMES.filter((t) => t.isLight && !t.isChessCom);
-  const allDarkCount = APP_THEMES.filter((t) => !t.isLight).length;
-  const allLightCount = APP_THEMES.filter((t) => t.isLight).length;
+  const animationPresets: Array<{ id: AnimationLevelId; name: string; desc: string }> = [
+    { id: 'off', name: t('animOff'), desc: t('animOffDesc') },
+    { id: 'subtle', name: t('animSubtle'), desc: t('animSubtleDesc') },
+    { id: 'smooth', name: t('animSmooth'), desc: t('animSmoothDesc') },
+    { id: 'expressive', name: t('animExpressive'), desc: t('animExpressiveDesc') },
+  ];
+  const activeAnimPreset =
+    animationPresets.find((p) => p.id === preferences.animationLevel) ?? animationPresets[2];
+
+  const chessComThemes = APP_THEMES.filter((item) => item.isChessCom);
+  const darkThemes = APP_THEMES.filter((item) => !item.isLight && !item.isChessCom);
+  const lightThemes = APP_THEMES.filter((item) => item.isLight && !item.isChessCom);
+  const allDarkCount = APP_THEMES.filter((item) => !item.isLight).length;
+  const allLightCount = APP_THEMES.filter((item) => item.isLight).length;
   const allBoards = [
     ...Object.values(BOARD_THEMES).filter((b) => b.category === 'Chess.com'),
     ...Object.values(BOARD_THEMES).filter((b) => b.category !== 'Chess.com'),
@@ -73,14 +101,16 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
 
   if (subPage === 'root') {
     return (
-      <div className="max-w-[920px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-6" data-testid="settings-view">
+      <div
+        key="settings-root"
+        className="max-w-[920px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-6 anim-view-enter"
+        data-testid="settings-view"
+      >
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--app-text)]">
-            Settings
+            {t('settingsTitle')}
           </h1>
-          <p className="text-sm text-[var(--app-text-muted)] mt-1">
-            Select a category to customize interface themes, futuristic glass icons, boards, pieces, and Stockfish defaults.
-          </p>
+          <p className="text-sm text-[var(--app-text-muted)] mt-1">{t('settingsSubtitle')}</p>
         </div>
 
         {/* Categorized Drill-Down Setting Sections */}
@@ -89,16 +119,19 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           <button
             type="button"
             onClick={() => onChangeSubPage('app-theme')}
-            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group"
+            style={{ '--stagger': 0 } as React.CSSProperties}
+            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
           >
             <div className="flex items-center gap-4 min-w-0">
               <div className="w-12 h-12 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] flex items-center justify-center shrink-0">
                 <Palette className="w-5 h-5 text-[var(--app-accent)]" />
               </div>
               <div className="min-w-0">
-                <div className="text-base font-bold text-[var(--app-text)]">App Theme</div>
+                <div className="text-base font-bold text-[var(--app-text)]">{t('catAppTheme')}</div>
                 <div className="text-xs text-[var(--app-text-muted)] mt-0.5 truncate">
-                  Current: <span className="font-semibold text-[var(--app-text)]">{activeTheme.name}</span> · {APP_THEMES.length} themes
+                  {t('currentLabel')}:{' '}
+                  <span className="font-semibold text-[var(--app-text)]">{activeTheme.name}</span> ·{' '}
+                  {APP_THEMES.length} {t('catAppThemeUnit')}
                 </div>
               </div>
             </div>
@@ -116,14 +149,17 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           <button
             type="button"
             onClick={() => onChangeSubPage('app-icon')}
-            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group"
+            style={{ '--stagger': 1 } as React.CSSProperties}
+            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
           >
             <div className="flex items-center gap-4 min-w-0">
               <AppLogoIcon iconId={preferences.appIcon} className="w-12 h-12 shrink-0" />
               <div className="min-w-0">
-                <div className="text-base font-bold text-[var(--app-text)]">App Icon</div>
+                <div className="text-base font-bold text-[var(--app-text)]">{t('catAppIcon')}</div>
                 <div className="text-xs text-[var(--app-text-muted)] mt-0.5 truncate">
-                  Current: <span className="font-semibold text-[var(--app-text)]">{activeIcon.name}</span> · {APP_ICONS.length} futuristic glass icons
+                  {t('currentLabel')}:{' '}
+                  <span className="font-semibold text-[var(--app-text)]">{activeIcon.name}</span> ·{' '}
+                  {APP_ICONS.length} {t('catAppIconUnit')}
                 </div>
               </div>
             </div>
@@ -139,7 +175,8 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           <button
             type="button"
             onClick={() => onChangeSubPage('board-theme')}
-            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group"
+            style={{ '--stagger': 2 } as React.CSSProperties}
+            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
           >
             <div className="flex items-center gap-4 min-w-0">
               <span className="w-12 h-12 rounded-xl overflow-hidden grid grid-cols-2 grid-rows-2 shrink-0 border border-black/25 shadow-sm">
@@ -149,9 +186,11 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                 <span style={{ backgroundColor: activeBoard.light }} />
               </span>
               <div className="min-w-0">
-                <div className="text-base font-bold text-[var(--app-text)]">Board Theme</div>
+                <div className="text-base font-bold text-[var(--app-text)]">{t('catBoardTheme')}</div>
                 <div className="text-xs text-[var(--app-text-muted)] mt-0.5 truncate">
-                  Current: <span className="font-semibold text-[var(--app-text)]">{activeBoard.name}</span> · {Object.keys(BOARD_THEMES).length} boards
+                  {t('currentLabel')}:{' '}
+                  <span className="font-semibold text-[var(--app-text)]">{activeBoard.name}</span> ·{' '}
+                  {Object.keys(BOARD_THEMES).length} {t('catBoardThemeUnit')}
                 </div>
               </div>
             </div>
@@ -165,7 +204,8 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           <button
             type="button"
             onClick={() => onChangeSubPage('piece-style')}
-            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group"
+            style={{ '--stagger': 3 } as React.CSSProperties}
+            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
           >
             <div className="flex items-center gap-4 min-w-0">
               <div className="w-12 h-12 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] flex items-center justify-center -space-x-2 shrink-0 px-1">
@@ -177,9 +217,11 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                 </div>
               </div>
               <div className="min-w-0">
-                <div className="text-base font-bold text-[var(--app-text)]">Piece Style</div>
+                <div className="text-base font-bold text-[var(--app-text)]">{t('catPieceStyle')}</div>
                 <div className="text-xs text-[var(--app-text-muted)] mt-0.5 truncate">
-                  Current: <span className="font-semibold text-[var(--app-text)]">{activePiece.name}</span> · {Object.keys(PIECE_STYLES).length} piece sets
+                  {t('currentLabel')}:{' '}
+                  <span className="font-semibold text-[var(--app-text)]">{activePiece.name}</span> ·{' '}
+                  {Object.keys(PIECE_STYLES).length} {t('catPieceStyleUnit')}
                 </div>
               </div>
             </div>
@@ -189,20 +231,79 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
             </div>
           </button>
 
-          {/* 5. Gameplay & Stockfish */}
+          {/* 5. Animations & Motion */}
+          <button
+            type="button"
+            data-testid="settings-row-animations"
+            onClick={() => onChangeSubPage('animations')}
+            style={{ '--stagger': 4 } as React.CSSProperties}
+            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
+          >
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="w-12 h-12 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] flex items-center justify-center shrink-0">
+                <Wand2 className="w-5 h-5 text-[var(--app-accent)]" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-base font-bold text-[var(--app-text)]">{t('catAnimations')}</div>
+                <div className="text-xs text-[var(--app-text-muted)] mt-0.5 truncate">
+                  {t('currentLabel')}:{' '}
+                  <span className="font-semibold text-[var(--app-text)]">{activeAnimPreset.name}</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Sparkles className="hidden sm:block w-4 h-4 text-[var(--app-text-subtle)]" />
+              <ChevronRight className="w-5 h-5 text-[var(--app-text-muted)] group-hover:text-[var(--app-accent)] transition-colors" />
+            </div>
+          </button>
+
+          {/* 6. Language (VN / EN / TW / JP) */}
+          <button
+            type="button"
+            data-testid="settings-row-language"
+            onClick={() => onChangeSubPage('language')}
+            style={{ '--stagger': 5 } as React.CSSProperties}
+            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
+          >
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="w-12 h-12 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] flex items-center justify-center shrink-0">
+                <Globe className="w-5 h-5 text-[var(--app-accent)]" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-base font-bold text-[var(--app-text)]">{t('catLanguage')}</div>
+                <div className="text-xs text-[var(--app-text-muted)] mt-0.5 truncate">
+                  {t('currentLabel')}:{' '}
+                  <span className="font-semibold text-[var(--app-text)]">
+                    {activeLangOption.nativeName}
+                  </span>{' '}
+                  · VN / EN / TW / JP
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="px-2 py-0.5 rounded-md bg-[var(--app-surface-2)] border border-[var(--app-border)] text-xs font-mono font-bold text-[var(--app-accent)]">
+                {activeLangOption.code}
+              </span>
+              <ChevronRight className="w-5 h-5 text-[var(--app-text-muted)] group-hover:text-[var(--app-accent)] transition-colors" />
+            </div>
+          </button>
+
+          {/* 7. Gameplay & Stockfish */}
           <button
             type="button"
             onClick={() => onChangeSubPage('gameplay')}
-            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group"
+            style={{ '--stagger': 6 } as React.CSSProperties}
+            className="w-full p-4 sm:p-5 rounded-xl bg-[var(--app-surface)] border border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] transition-all flex items-center justify-between gap-4 text-left cursor-pointer group anim-card-stagger anim-interactive"
           >
             <div className="flex items-center gap-4 min-w-0">
               <div className="w-12 h-12 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] flex items-center justify-center shrink-0">
                 <SlidersHorizontal className="w-5 h-5 text-[var(--app-accent)]" />
               </div>
               <div className="min-w-0">
-                <div className="text-base font-bold text-[var(--app-text)]">Gameplay &amp; Stockfish</div>
+                <div className="text-base font-bold text-[var(--app-text)]">{t('catGameplay')}</div>
                 <div className="text-xs text-[var(--app-text-muted)] mt-0.5 font-mono tabular-nums truncate">
-                  Depth {preferences.analysisDepth} · {preferences.multiPv} PV lines · {preferences.muted ? 'Audio muted' : 'Audio on'}
+                  {t('depthLabel')} {preferences.analysisDepth} · {preferences.multiPv} {t('pvLinesUnit')} ·{' '}
+                  {preferences.muted ? t('audioMuted') : t('audioOn')}
                 </div>
               </div>
             </div>
@@ -213,8 +314,19 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
     );
   }
 
+  // Knight preview coordinates on a 4x2 mini board: jumps between (col 0, row 1) and (col 2, row 0)
+  const previewAtDest = previewStep % 2 === 1;
+  const knightDestCol = previewAtDest ? 2 : 0;
+  const knightDestRow = previewAtDest ? 0 : 1;
+  const knightSlideX = previewAtDest ? -2 : 2;
+  const knightSlideY = previewAtDest ? 1 : -1;
+
   return (
-    <div className="max-w-[960px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-6" data-testid={`settings-subpage-${subPage}`}>
+    <div
+      key={`settings-subpage-${subPage}`}
+      className="max-w-[960px] mx-auto px-4 sm:px-8 py-6 sm:py-8 flex flex-col gap-6 anim-view-enter"
+      data-testid={`settings-subpage-${subPage}`}
+    >
       {/* Sub-page Back Header */}
       <div className="flex flex-col gap-2">
         <button
@@ -223,29 +335,28 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           className="self-start inline-flex items-center gap-1.5 text-xs font-bold text-[var(--app-accent)] hover:underline cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          <span>Back to Settings</span>
+          <span>{t('backToSettings')}</span>
         </button>
 
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
           <div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--app-text)]">
-              {subPage === 'app-theme' && 'App Theme'}
-              {subPage === 'app-icon' && 'App Icon'}
-              {subPage === 'board-theme' && 'Board Theme'}
-              {subPage === 'piece-style' && 'Piece Style'}
-              {subPage === 'gameplay' && 'Gameplay & Stockfish'}
+              {subPage === 'app-theme' && t('catAppTheme')}
+              {subPage === 'app-icon' && t('catAppIcon')}
+              {subPage === 'board-theme' && t('catBoardTheme')}
+              {subPage === 'piece-style' && t('catPieceStyle')}
+              {subPage === 'animations' && t('catAnimations')}
+              {subPage === 'language' && t('catLanguage')}
+              {subPage === 'gameplay' && t('catGameplay')}
             </h1>
             <p className="text-sm text-[var(--app-text-muted)] mt-1">
-              {subPage === 'app-theme' &&
-                `Choose from ${APP_THEMES.length} Chess.com, dark, and daylight palettes applied immediately across the app.`}
-              {subPage === 'app-icon' &&
-                'Futuristic frosted-jade and translucent crystal emblems synced to your sidebar and browser tab.'}
-              {subPage === 'board-theme' &&
-                `Select from ${allBoards.length} Chess.com, classic, wood, stone, and modern chessboard finishes.`}
-              {subPage === 'piece-style' &&
-                'Customize Staunton piece palettes including frosted jade, sapphire ice, and metallic finishes.'}
-              {subPage === 'gameplay' &&
-                'Configure board overlays, audio cues, and default Stockfish WASM analysis depth.'}
+              {subPage === 'app-theme' && t('catAppThemeSub', { count: APP_THEMES.length })}
+              {subPage === 'app-icon' && t('catAppIconSub')}
+              {subPage === 'board-theme' && t('catBoardThemeSub', { count: allBoards.length })}
+              {subPage === 'piece-style' && t('catPieceStyleSub')}
+              {subPage === 'animations' && t('catAnimationsSub')}
+              {subPage === 'language' && t('catLanguageSub')}
+              {subPage === 'gameplay' && t('catGameplaySub')}
             </p>
           </div>
         </div>
@@ -254,7 +365,6 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       {/* SUB-PAGE 1: APP THEME */}
       {subPage === 'app-theme' && (
         <div className="flex flex-col gap-5">
-          {/* Interactive Theme Filter Control */}
           <div
             role="group"
             aria-label="Filter app themes"
@@ -262,10 +372,10 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           >
             {(
               [
-                { id: 'all', label: `All (${APP_THEMES.length})` },
+                { id: 'all', label: `${t('filterAll')} (${APP_THEMES.length})` },
                 { id: 'chesscom', label: `Chess.com (${chessComThemes.length})` },
-                { id: 'dark', label: `Dark (${allDarkCount})` },
-                { id: 'light', label: `Light (${allLightCount})` },
+                { id: 'dark', label: `${t('filterDark')} (${allDarkCount})` },
+                { id: 'light', label: `${t('filterLight')} (${allLightCount})` },
               ] as const
             ).map((opt) => (
               <button
@@ -287,17 +397,17 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           {(themeFilter === 'all' || themeFilter === 'chesscom') && (
             <section className="flex flex-col gap-3">
               <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
-                Chess.com Themes ({chessComThemes.length})
+                {t('chessComThemesHeading')} ({chessComThemes.length})
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {chessComThemes.map((t) => {
-                  const active = preferences.appTheme === t.id;
+                {chessComThemes.map((item) => {
+                  const active = preferences.appTheme === item.id;
                   return (
                     <button
-                      key={t.id}
+                      key={item.id}
                       type="button"
-                      onClick={() => onUpdatePreferences({ appTheme: t.id })}
-                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 ${
+                      onClick={() => onUpdatePreferences({ appTheme: item.id })}
+                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 anim-interactive ${
                         active
                           ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
                           : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
@@ -305,15 +415,15 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
-                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchBg }} />
-                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchSurface }} />
-                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchAccent }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: item.swatchBg }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: item.swatchSurface }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: item.swatchAccent }} />
                         </div>
                         {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
-                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{t.description}</div>
+                        <div className="text-sm font-bold text-[var(--app-text)]">{item.name}</div>
+                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{item.description}</div>
                       </div>
                     </button>
                   );
@@ -325,17 +435,17 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           {(themeFilter === 'all' || themeFilter === 'dark') && (
             <section className="flex flex-col gap-3">
               <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
-                Dark Themes ({themeFilter === 'dark' ? allDarkCount : darkThemes.length})
+                {t('darkThemesHeading')} ({themeFilter === 'dark' ? allDarkCount : darkThemes.length})
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {(themeFilter === 'dark' ? APP_THEMES.filter((t) => !t.isLight) : darkThemes).map((t) => {
-                  const active = preferences.appTheme === t.id;
+                {(themeFilter === 'dark' ? APP_THEMES.filter((item) => !item.isLight) : darkThemes).map((item) => {
+                  const active = preferences.appTheme === item.id;
                   return (
                     <button
-                      key={t.id}
+                      key={item.id}
                       type="button"
-                      onClick={() => onUpdatePreferences({ appTheme: t.id })}
-                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 ${
+                      onClick={() => onUpdatePreferences({ appTheme: item.id })}
+                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 anim-interactive ${
                         active
                           ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
                           : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
@@ -343,15 +453,15 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
-                          <span className="w-6 h-6 rounded-md border border-white/15" style={{ backgroundColor: t.swatchBg }} />
-                          <span className="w-6 h-6 rounded-md border border-white/15" style={{ backgroundColor: t.swatchSurface }} />
-                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchAccent }} />
+                          <span className="w-6 h-6 rounded-md border border-white/15" style={{ backgroundColor: item.swatchBg }} />
+                          <span className="w-6 h-6 rounded-md border border-white/15" style={{ backgroundColor: item.swatchSurface }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: item.swatchAccent }} />
                         </div>
                         {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
-                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{t.description}</div>
+                        <div className="text-sm font-bold text-[var(--app-text)]">{item.name}</div>
+                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{item.description}</div>
                       </div>
                     </button>
                   );
@@ -363,17 +473,17 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           {(themeFilter === 'all' || themeFilter === 'light') && (
             <section className="flex flex-col gap-3">
               <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
-                Light Themes ({themeFilter === 'light' ? allLightCount : lightThemes.length})
+                {t('lightThemesHeading')} ({themeFilter === 'light' ? allLightCount : lightThemes.length})
               </h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {(themeFilter === 'light' ? APP_THEMES.filter((t) => t.isLight) : lightThemes).map((t) => {
-                  const active = preferences.appTheme === t.id;
+                {(themeFilter === 'light' ? APP_THEMES.filter((item) => item.isLight) : lightThemes).map((item) => {
+                  const active = preferences.appTheme === item.id;
                   return (
                     <button
-                      key={t.id}
+                      key={item.id}
                       type="button"
-                      onClick={() => onUpdatePreferences({ appTheme: t.id })}
-                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 ${
+                      onClick={() => onUpdatePreferences({ appTheme: item.id })}
+                      className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-3 anim-interactive ${
                         active
                           ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
                           : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
@@ -381,15 +491,15 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
-                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchBg }} />
-                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchSurface }} />
-                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: t.swatchAccent }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: item.swatchBg }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: item.swatchSurface }} />
+                          <span className="w-6 h-6 rounded-md border border-black/20" style={{ backgroundColor: item.swatchAccent }} />
                         </div>
                         {active && <Check className="w-4 h-4 text-[var(--app-accent)]" />}
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-[var(--app-text)]">{t.name}</div>
-                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{t.description}</div>
+                        <div className="text-sm font-bold text-[var(--app-text)]">{item.name}</div>
+                        <div className="text-xs text-[var(--app-text-muted)] mt-0.5 leading-snug">{item.description}</div>
                       </div>
                     </button>
                   );
@@ -403,14 +513,13 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       {/* SUB-PAGE 2: FUTURISTIC FROSTED-JADE APP ICON */}
       {subPage === 'app-icon' && (
         <div className="flex flex-col gap-5">
-          {/* Live Brand Lockup Preview */}
           <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <AppLogoIcon iconId={preferences.appIcon} className="w-14 h-14 shrink-0" />
               <div>
                 <div className="text-xs font-semibold text-[var(--app-accent)] flex items-center gap-1">
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>Active App Emblem</span>
+                  <span>{t('activeAppEmblem')}</span>
                 </div>
                 <div className="text-lg font-extrabold text-[var(--app-text)] leading-tight mt-0.5">
                   {activeIcon.name}
@@ -428,7 +537,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                   key={ic.id}
                   type="button"
                   onClick={() => onUpdatePreferences({ appIcon: ic.id })}
-                  className={`p-4 rounded-xl border flex flex-col items-center gap-3 transition-all cursor-pointer relative ${
+                  className={`p-4 rounded-xl border flex flex-col items-center gap-3 transition-all cursor-pointer relative anim-interactive ${
                     active
                       ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
                       : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
@@ -454,11 +563,14 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       {/* SUB-PAGE 3: BOARD THEME */}
       {subPage === 'board-theme' && (
         <div className="flex flex-col gap-5">
-          {/* Live 8x2 Board + Active Pieces Preview Strip */}
           <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-[var(--app-text)]">Live Preview · {activeBoard.name}</span>
-              <span className="text-[var(--app-text-muted)]">Pieces: {activePiece.name}</span>
+              <span className="font-bold text-[var(--app-text)]">
+                {t('livePreview')} · {activeBoard.name}
+              </span>
+              <span className="text-[var(--app-text-muted)]">
+                {t('piecesLabel')}: {activePiece.name}
+              </span>
             </div>
             <div className="grid grid-cols-6 sm:grid-cols-12 rounded-lg overflow-hidden border border-black/25">
               {PREVIEW_ROW_PIECES.map((item, idx) => {
@@ -484,7 +596,6 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
             </div>
           </div>
 
-          {/* Interactive Board Category Filter */}
           <div
             role="group"
             aria-label="Filter board themes by material"
@@ -504,7 +615,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                       : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                   }`}
                 >
-                  {cat} ({count})
+                  {cat === 'All' ? t('filterAll') : cat} ({count})
                 </button>
               );
             })}
@@ -518,7 +629,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                   key={b.id}
                   type="button"
                   onClick={() => onUpdatePreferences({ boardTheme: b.id as BoardThemeId })}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-2.5 ${
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-2.5 anim-interactive ${
                     active
                       ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
                       : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
@@ -557,11 +668,14 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       {/* SUB-PAGE 4: PIECE STYLE */}
       {subPage === 'piece-style' && (
         <div className="flex flex-col gap-5">
-          {/* Live All-Pieces Preview on Current Board */}
           <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-[var(--app-text)]">Live Preview · {activePiece.name}</span>
-              <span className="text-[var(--app-text-muted)]">Board: {activeBoard.name}</span>
+              <span className="font-bold text-[var(--app-text)]">
+                {t('livePreview')} · {activePiece.name}
+              </span>
+              <span className="text-[var(--app-text-muted)]">
+                {t('boardLabel')}: {activeBoard.name}
+              </span>
             </div>
             <div className="grid grid-cols-6 sm:grid-cols-12 rounded-lg overflow-hidden border border-black/25">
               {PREVIEW_ROW_PIECES.map((item, idx) => {
@@ -588,7 +702,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                   key={pid}
                   type="button"
                   onClick={() => onUpdatePreferences({ pieceStyle: pid })}
-                  className={`p-3.5 rounded-xl border flex flex-col items-center gap-2.5 transition-all cursor-pointer ${
+                  className={`p-3.5 rounded-xl border flex flex-col items-center gap-2.5 transition-all cursor-pointer anim-interactive ${
                     active
                       ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
                       : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
@@ -618,28 +732,239 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
         </div>
       )}
 
-      {/* SUB-PAGE 5: GAMEPLAY & STOCKFISH DEFAULTS */}
+      {/* SUB-PAGE 5: ANIMATIONS & MOTION */}
+      {subPage === 'animations' && (
+        <div className="flex flex-col gap-5">
+          {/* Interactive Live Motion Preview */}
+          <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex flex-col gap-2">
+              <div className="text-xs font-bold text-[var(--app-text)]">{t('animPreviewTitle')}</div>
+              <p className="text-xs text-[var(--app-text-muted)] max-w-[340px]">
+                {activeAnimPreset.name} · {activeAnimPreset.desc}
+              </p>
+              <button
+                type="button"
+                data-testid="replay-animation-preview"
+                onClick={() => setPreviewStep((s) => s + 1)}
+                className="self-start mt-1 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] text-xs font-extrabold cursor-pointer anim-interactive"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>{t('animPreviewReplay')}</span>
+              </button>
+            </div>
+
+            <div className="w-full sm:w-[240px] shrink-0 grid grid-cols-4 grid-rows-2 rounded-lg overflow-hidden border border-black/25 shadow-sm">
+              {[0, 1, 2, 3, 4, 5, 6, 7].map((idx) => {
+                const row = Math.floor(idx / 4);
+                const col = idx % 4;
+                const isLight = (row + col) % 2 === 0;
+                const isKnightHere = row === knightDestRow && col === knightDestCol;
+                const isOriginHere =
+                  previewStep > 0 &&
+                  row === (previewAtDest ? 1 : 0) &&
+                  col === (previewAtDest ? 0 : 2);
+                const bg =
+                  isKnightHere || isOriginHere
+                    ? isLight
+                      ? activeBoard.lastMoveLight
+                      : activeBoard.lastMoveDark
+                    : isLight
+                      ? activeBoard.light
+                      : activeBoard.dark;
+
+                return (
+                  <div
+                    key={idx}
+                    className="relative aspect-square flex items-center justify-center p-1"
+                    style={{ backgroundColor: bg }}
+                  >
+                    {isKnightHere && (
+                      <div
+                        key={`knight-${previewStep}`}
+                        style={
+                          previewStep > 0
+                            ? ({
+                                '--slide-x': knightSlideX,
+                                '--slide-y': knightSlideY,
+                              } as React.CSSProperties)
+                            : undefined
+                        }
+                        className={`w-[84%] h-[84%] ${previewStep > 0 ? 'anim-piece-slide' : ''}`}
+                      >
+                        <ChessPiece type="n" color="w" pieceStyle={preferences.pieceStyle} />
+                      </div>
+                    )}
+                    {isKnightHere && previewStep > 0 && (
+                      <div
+                        key={`badge-${previewStep}`}
+                        className="absolute top-0.5 right-0.5 z-10 pointer-events-none anim-badge-pop"
+                      >
+                        <MoveBadge
+                          classification={previewAtDest ? 'brilliant' : 'best'}
+                          variant="board"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 4 Intensity Presets */}
+          <section className="flex flex-col gap-3">
+            <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
+              {t('animIntensityHeading')}
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {animationPresets.map((preset, idx) => {
+                const active = preferences.animationLevel === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    data-testid={`anim-preset-${preset.id}`}
+                    aria-pressed={active}
+                    onClick={() => {
+                      onUpdatePreferences({ animationLevel: preset.id });
+                      setPreviewStep((s) => s + 1);
+                    }}
+                    style={{ '--stagger': idx } as React.CSSProperties}
+                    className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-1.5 anim-card-stagger anim-interactive ${
+                      active
+                        ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                        : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-extrabold text-[var(--app-text)]">{preset.name}</span>
+                      {active && <Check className="w-4 h-4 text-[var(--app-accent)] shrink-0" />}
+                    </div>
+                    <p className="text-xs text-[var(--app-text-muted)] leading-snug">{preset.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Granular Motion Channel Toggles */}
+          <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-3">
+            <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
+              {t('animTogglesHeading')}
+            </h2>
+            <div className="flex flex-col gap-2.5">
+              {[
+                {
+                  id: 'piece-motion',
+                  label: t('animPieceSlideToggle'),
+                  desc: t('animPieceSlideDesc'),
+                  checked: preferences.pieceMoveAnimation,
+                  toggle: () => {
+                    onUpdatePreferences({ pieceMoveAnimation: !preferences.pieceMoveAnimation });
+                    setPreviewStep((s) => s + 1);
+                  },
+                },
+                {
+                  id: 'ui-transitions',
+                  label: t('animUiTransitionsToggle'),
+                  desc: t('animUiTransitionsDesc'),
+                  checked: preferences.uiTransitions,
+                  toggle: () => onUpdatePreferences({ uiTransitions: !preferences.uiTransitions }),
+                },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="switch"
+                  aria-checked={opt.checked}
+                  onClick={opt.toggle}
+                  className="flex items-center justify-between gap-4 px-4 py-3.5 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors text-left cursor-pointer anim-interactive"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-[var(--app-text)]">{opt.label}</div>
+                    <div className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-snug">{opt.desc}</div>
+                  </div>
+                  <span
+                    className={`w-9 h-5 rounded-full p-0.5 transition-colors flex items-center shrink-0 ${
+                      opt.checked ? 'bg-[var(--app-accent)] justify-end' : 'bg-black/30 justify-start'
+                    }`}
+                  >
+                    <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* SUB-PAGE 6: LANGUAGE (VN / EN / TW / JP) */}
+      {subPage === 'language' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5" data-testid="language-selector-grid">
+          {LANGUAGE_OPTIONS.map((option, idx) => {
+            const active = preferences.language === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                data-testid={`lang-option-${option.code.toLowerCase()}`}
+                aria-pressed={active}
+                onClick={() => onUpdatePreferences({ language: option.id })}
+                style={{ '--stagger': idx } as React.CSSProperties}
+                className={`p-5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-4 anim-card-stagger anim-interactive ${
+                  active
+                    ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                    : 'border-[var(--app-border)] bg-[var(--app-surface)] hover:border-[var(--app-border-strong)]'
+                }`}
+              >
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div
+                    className={`w-12 h-12 rounded-xl border flex items-center justify-center font-mono font-extrabold text-sm shrink-0 ${
+                      active
+                        ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)] border-[var(--app-accent)]'
+                        : 'bg-[var(--app-surface-2)] text-[var(--app-text)] border-[var(--app-border)]'
+                    }`}
+                  >
+                    {option.code}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-base font-extrabold text-[var(--app-text)] leading-tight truncate">
+                      {option.nativeName}
+                    </div>
+                    <div className="text-xs text-[var(--app-text-muted)] mt-0.5 truncate">
+                      {option.englishName} · {option.regionLabel}
+                    </div>
+                  </div>
+                </div>
+                {active && <Check className="w-5 h-5 text-[var(--app-accent)] shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* SUB-PAGE 7: GAMEPLAY & STOCKFISH DEFAULTS */}
       {subPage === 'gameplay' && (
         <section className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {[
               {
-                label: 'Show Evaluation Bar',
+                label: t('toggleEvalBar'),
                 checked: preferences.showEvalBar,
                 toggle: () => onUpdatePreferences({ showEvalBar: !preferences.showEvalBar }),
               },
               {
-                label: 'Board Coordinates',
+                label: t('toggleCoords'),
                 checked: preferences.showCoordinates,
                 toggle: () => onUpdatePreferences({ showCoordinates: !preferences.showCoordinates }),
               },
               {
-                label: 'Legal Move Dots',
+                label: t('toggleLegalMoves'),
                 checked: preferences.showLegalMoves,
                 toggle: () => onUpdatePreferences({ showLegalMoves: !preferences.showLegalMoves }),
               },
               {
-                label: 'Piece Sound Effects',
+                label: t('toggleSounds'),
                 checked: !preferences.muted,
                 toggle: () => onUpdatePreferences({ muted: !preferences.muted }),
               },
@@ -650,7 +975,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                 role="switch"
                 aria-checked={opt.checked}
                 onClick={opt.toggle}
-                className="flex items-center justify-between px-4 py-3.5 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors cursor-pointer"
+                className="flex items-center justify-between px-4 py-3.5 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] hover:border-[var(--app-border-strong)] transition-colors cursor-pointer anim-interactive"
               >
                 <span className="text-xs font-semibold text-[var(--app-text)]">{opt.label}</span>
                 <span
@@ -668,10 +993,10 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label htmlFor="pref-depth-slider" className="text-xs font-bold text-[var(--app-text)]">
-                  Default Stockfish Depth
+                  {t('defaultDepth')}
                 </label>
                 <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)]">
-                  Depth {preferences.analysisDepth}
+                  {t('depthLabel')} {preferences.analysisDepth}
                 </span>
               </div>
               <input
@@ -687,14 +1012,14 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-[var(--app-text)]">MultiPV Analysis Lines</span>
+              <span className="text-xs font-bold text-[var(--app-text)]">{t('multiPvLines')}</span>
               <div className="flex items-center gap-1.5">
                 {[1, 2, 3].map((n) => (
                   <button
                     key={n}
                     type="button"
                     onClick={() => onUpdatePreferences({ multiPv: n })}
-                    className={`w-8 h-8 rounded-lg font-mono text-xs font-bold cursor-pointer ${
+                    className={`w-8 h-8 rounded-lg font-mono text-xs font-bold cursor-pointer anim-interactive ${
                       preferences.multiPv === n
                         ? 'bg-[var(--app-accent)] text-[var(--app-accent-fg)]'
                         : 'bg-[var(--app-surface-2)] text-[var(--app-text-muted)] border border-[var(--app-border)]'

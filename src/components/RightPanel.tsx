@@ -30,6 +30,7 @@ import {
 import { evalToWhiteWinProbability, formatEvalScore, formatNodes } from '../engine/uciParser';
 import { formatPvSanWithNumbers } from '../game/chessLogic';
 import { CLASSIC_STUDIES } from '../game/openings';
+import { useI18n } from '../i18n/LanguageContext';
 import { EvalGraph } from './EvalGraph';
 import { MatchRatingPanel } from './MatchRatingPanel';
 import { MoveBadge } from './MoveBadge';
@@ -109,6 +110,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onLoadStudy,
   pgnText,
 }) => {
+  const { t } = useI18n();
   const moveListContainerRef = useRef<HTMLDivElement>(null);
   const activeMoveBtnRef = useRef<HTMLButtonElement | null>(null);
   const [importInput, setImportInput] = useState('');
@@ -217,10 +219,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
       >
         {(
           [
-            { id: 'moves', label: 'Moves', icon: ListOrdered },
-            { id: 'rating', label: 'Rating', icon: Award },
-            { id: 'engine', label: 'Stockfish', icon: Cpu },
-            { id: 'library', label: 'Library', icon: BookOpen },
+            { id: 'moves', label: t('tabMoves'), icon: ListOrdered },
+            { id: 'rating', label: t('tabRating'), icon: Award },
+            { id: 'engine', label: t('tabStockfish'), icon: Cpu },
+            { id: 'library', label: t('tabLibrary'), icon: BookOpen },
           ] as { id: RightPanelTab; label: string; icon: React.ComponentType<{ className?: string }> }[]
         ).map((tab) => {
           const Icon = tab.icon;
@@ -247,11 +249,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
       {/* TAB 1: MOVES & GAME CONTROLS */}
       {activeTab === 'moves' && (
-        <div className="flex flex-col flex-1 min-h-0">
+        <div key="tab-moves" className="flex flex-col flex-1 min-h-0 anim-view-enter">
           <div className="px-4 py-2.5 bg-[var(--app-surface-2)] border-b border-[var(--app-border)] flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-xs font-semibold text-[var(--app-text)] truncate">
-                {opening ? `${opening.eco} · ${opening.name}` : positionLabel ?? 'Starting Position'}
+                {opening ? `${opening.eco} · ${opening.name}` : positionLabel ?? t('startingPosition')}
               </div>
               <div className="text-[11px] text-[var(--app-text-muted)] flex items-center gap-1.5 font-mono tabular-nums mt-0.5">
                 <span>Stockfish</span>
@@ -270,22 +272,22 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 type="button"
                 onClick={() => handleCopy('pgn')}
                 disabled={moves.length === 0}
-                title="Copy full PGN to clipboard"
-                className="px-2 py-1 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1 transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap"
+                title={t('copyPgn')}
+                className="px-2 py-1 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1 transition-colors cursor-pointer disabled:cursor-not-allowed whitespace-nowrap anim-interactive"
               >
                 {copiedType === 'pgn' ? (
                   <Check className="w-3 h-3 text-[var(--app-accent)]" />
                 ) : (
                   <Copy className="w-3 h-3 text-[var(--app-text-muted)]" />
                 )}
-                <span>{copiedType === 'pgn' ? 'Copied' : 'Copy PGN'}</span>
+                <span>{copiedType === 'pgn' ? t('copied') : t('copyPgn')}</span>
               </button>
               <button
                 type="button"
                 onClick={() => onTabChange('engine')}
                 className="text-xs font-semibold text-[var(--app-accent)] hover:underline whitespace-nowrap cursor-pointer"
               >
-                Lines →
+                {t('tabStockfish')} →
               </button>
             </div>
           </div>
@@ -298,8 +300,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           <div className="px-3.5 pt-2.5 pb-1 flex items-center justify-between gap-2">
             <span className="text-[11px] font-semibold text-[var(--app-text-muted)] font-mono tabular-nums">
               {moves.length === 0
-                ? 'Move History'
-                : `Move ${Math.ceil(viewPly / 2)} of ${Math.ceil(moves.length / 2)}`}
+                ? t('tabMoves')
+                : `${Math.ceil(viewPly / 2)} / ${Math.ceil(moves.length / 2)}`}
             </span>
             <div
               role="group"
@@ -310,7 +312,6 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 type="button"
                 aria-pressed={moveViewMode === 'flow'}
                 onClick={() => setMoveViewMode('flow')}
-                title="Compact flowing PGN chips (great for mobile)"
                 className={`px-2 py-1 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${
                   moveViewMode === 'flow'
                     ? 'bg-[var(--app-surface)] text-[var(--app-text)] shadow-xs'
@@ -318,13 +319,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 }`}
               >
                 <LayoutGrid className="w-3 h-3" />
-                <span>Compact</span>
+                <span>{t('viewCompact')}</span>
               </button>
               <button
                 type="button"
                 aria-pressed={moveViewMode === 'table'}
                 onClick={() => setMoveViewMode('table')}
-                title="Classic 2-column move table"
                 className={`px-2 py-1 rounded text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer ${
                   moveViewMode === 'table'
                     ? 'bg-[var(--app-surface)] text-[var(--app-text)] shadow-xs'
@@ -332,7 +332,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 }`}
               >
                 <AlignJustify className="w-3 h-3" />
-                <span>Table</span>
+                <span>{t('viewTable')}</span>
               </button>
             </div>
           </div>
@@ -344,9 +344,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           >
             {moveRows.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center py-6 px-4">
-                <p className="text-sm font-semibold text-[var(--app-text)]">No moves played yet</p>
+                <p className="text-sm font-semibold text-[var(--app-text)]">{t('noMovesYet')}</p>
                 <p className="text-xs text-[var(--app-text-muted)] mt-1 max-w-[240px]">
-                  Click or drag any piece on the board to begin. Stockfish evaluates every position in real time.
+                  {t('moveHistoryEmpty')}
                 </p>
               </div>
             ) : moveViewMode === 'flow' ? (
@@ -498,37 +498,37 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 type="button"
                 onClick={onRequestHint}
                 disabled={isGameOver}
-                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer"
+                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
               >
                 <Lightbulb className="w-3.5 h-3.5 text-[#E6A832]" />
-                <span>Hint</span>
+                <span>{t('actionHint')}</span>
               </button>
               <button
                 type="button"
                 onClick={onTakeback}
                 disabled={moves.length === 0}
-                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer"
+                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
               >
                 <RotateCcw className="w-3.5 h-3.5 text-[var(--app-text-muted)]" />
-                <span>Takeback</span>
+                <span>{t('actionTakeback')}</span>
               </button>
               <button
                 type="button"
                 onClick={onOfferDraw}
                 disabled={isGameOver || mode === 'analysis'}
-                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer"
+                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
               >
                 <Handshake className="w-3.5 h-3.5 text-[var(--app-text-muted)]" />
-                <span>Draw</span>
+                <span>{t('actionDraw')}</span>
               </button>
               <button
                 type="button"
                 onClick={onResign}
                 disabled={isGameOver || mode === 'analysis'}
-                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[#C94A4A]/20 border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer"
+                className="flex flex-col items-center justify-center gap-1 py-2 px-1 rounded-lg bg-[var(--app-surface)] hover:bg-[#C94A4A]/20 border border-[var(--app-border)] disabled:opacity-40 text-[var(--app-text)] text-[11px] font-medium transition-colors cursor-pointer anim-interactive"
               >
                 <Flag className="w-3.5 h-3.5 text-[#D96666]" />
-                <span>Resign</span>
+                <span>{t('actionResign')}</span>
               </button>
             </div>
 
@@ -540,17 +540,17 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   if (moves.length > 0 && !isReviewing) onRunGameReview();
                 }}
                 disabled={moves.length === 0 || isReviewing}
-                className="py-2.5 px-3 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-xs font-bold text-[var(--app-text)] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                className="py-2.5 px-3 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] disabled:opacity-40 text-xs font-bold text-[var(--app-text)] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap anim-interactive"
               >
                 <Sparkles className="w-3.5 h-3.5 text-[var(--app-accent)]" />
-                <span>{isReviewing ? `Rating ${reviewProgress}%` : 'Rate Match'}</span>
+                <span>{isReviewing ? `${reviewProgress}%` : t('rateMatch')}</span>
               </button>
               <button
                 type="button"
                 onClick={onNewMatch}
-                className="py-2.5 px-3 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-xs font-extrabold text-[var(--app-accent-fg)] transition-colors cursor-pointer whitespace-nowrap"
+                className="py-2.5 px-3 rounded-lg bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-xs font-extrabold text-[var(--app-accent-fg)] transition-colors cursor-pointer whitespace-nowrap anim-interactive"
               >
-                New Match
+                {t('actionNewMatch')}
               </button>
             </div>
           </div>
@@ -559,7 +559,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
       {/* TAB 2: DEDICATED MATCH RATING REPORT */}
       {activeTab === 'rating' && (
-        <div className="flex flex-col flex-1 min-h-0">
+        <div key="tab-rating" className="flex flex-col flex-1 min-h-0 anim-view-enter">
           <MatchRatingPanel
             moves={moves}
             viewPly={viewPly}
@@ -615,7 +615,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
       {/* TAB 3: LIVE STOCKFISH UCI ENGINE LINES */}
       {activeTab === 'engine' && (
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4" data-testid="stockfish-panel">
+        <div
+          key="tab-engine"
+          className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 anim-view-enter"
+          data-testid="stockfish-panel"
+        >
           <div className="flex items-center justify-between gap-2 pb-3 border-b border-[var(--app-border)]">
             <div>
               <h2 className="text-sm font-bold text-[var(--app-text)]">Stockfish WASM Engine</h2>
@@ -742,23 +746,23 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
       {/* TAB 4: LIBRARY, FEN/PGN IMPORT & EXPORT */}
       {activeTab === 'library' && (
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
+        <div key="tab-library" className="flex-1 overflow-y-auto p-4 flex flex-col gap-5 anim-view-enter">
           <div className="flex flex-col gap-3">
             {/* FEN Display & Copy */}
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="text-xs font-bold text-[var(--app-text)]">Position FEN</h2>
+                <h2 className="text-xs font-bold text-[var(--app-text)]">{t('fenNotation')}</h2>
                 <button
                   type="button"
                   onClick={() => handleCopy('fen')}
-                  className="py-1 px-2.5 rounded-md bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  className="py-1 px-2.5 rounded-md bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap anim-interactive"
                 >
                   {copiedType === 'fen' ? (
                     <Check className="w-3 h-3 text-[var(--app-accent)]" />
                   ) : (
                     <Copy className="w-3 h-3 text-[var(--app-text-muted)]" />
                   )}
-                  <span>{copiedType === 'fen' ? 'Copied FEN' : 'Copy FEN'}</span>
+                  <span>{copiedType === 'fen' ? t('copied') : t('copyFen')}</span>
                 </button>
               </div>
               <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-lg p-2.5 font-mono text-[11px] text-[var(--app-text-muted)] break-all">
@@ -769,18 +773,18 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             {/* PGN Display Area & Copy PGN Button */}
             <div className="flex flex-col gap-1.5" data-testid="pgn-display-area">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="text-xs font-bold text-[var(--app-text)]">Game PGN</h2>
+                <h2 className="text-xs font-bold text-[var(--app-text)]">{t('pgnNotation')}</h2>
                 <button
                   type="button"
                   onClick={() => handleCopy('pgn')}
-                  className="py-1 px-2.5 rounded-md bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  className="py-1 px-2.5 rounded-md bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text)] inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap anim-interactive"
                 >
                   {copiedType === 'pgn' ? (
                     <Check className="w-3 h-3 text-[var(--app-accent)]" />
                   ) : (
                     <Copy className="w-3 h-3 text-[var(--app-text-muted)]" />
                   )}
-                  <span>{copiedType === 'pgn' ? 'Copied PGN' : 'Copy PGN'}</span>
+                  <span>{copiedType === 'pgn' ? t('copied') : t('copyPgn')}</span>
                 </button>
               </div>
               <pre

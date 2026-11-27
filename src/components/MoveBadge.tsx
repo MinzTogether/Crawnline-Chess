@@ -1,5 +1,6 @@
 import React from 'react';
 import { CLASSIFICATION_META, type MoveClassification } from '../types/chess';
+import { useI18n } from '../i18n/LanguageContext';
 
 interface MoveBadgeProps {
   classification: MoveClassification;
@@ -213,15 +214,17 @@ export const MoveBadge: React.FC<MoveBadgeProps> = ({
   className = '',
   showTitle = true,
 }) => {
+  const { getClassificationLabel } = useI18n();
   const palette = CHESSCOM_BADGE_PALETTES[classification];
   const meta = CLASSIFICATION_META[classification];
+  const localizedLabel = getClassificationLabel(classification);
   const isBoard = variant === 'board';
 
   return (
     <span
       data-testid={`move-badge-${classification}`}
-      title={showTitle ? `${meta.label} (${meta.symbol})` : undefined}
-      aria-label={meta.label}
+      title={showTitle ? `${localizedLabel} (${meta.symbol})` : undefined}
+      aria-label={localizedLabel}
       className={`inline-flex items-center justify-center shrink-0 select-none ${SIZE_CLASSES[variant]} ${className}`}
       style={
         isBoard
