@@ -676,9 +676,13 @@ export const SEEDED_MATCHES: SavedMatch[] = [
   },
 ];
 
-const PREFS_KEY = 'crownline_preferences_v1';
-const PROFILE_KEY = 'crownline_profile_v1';
-const MATCHES_KEY = 'crownline_matches_v1';
+export const PREFERENCES_STORAGE_KEY = 'crownline_preferences_v1';
+export const PROFILE_STORAGE_KEY = 'crownline_profile_v1';
+export const MATCHES_STORAGE_KEY = 'crownline_matches_v1';
+
+const PREFS_KEY = PREFERENCES_STORAGE_KEY;
+const PROFILE_KEY = PROFILE_STORAGE_KEY;
+const MATCHES_KEY = MATCHES_STORAGE_KEY;
 
 const VALID_APP_THEMES = new Set<string>(APP_THEMES.map((t) => t.id));
 const VALID_LANGUAGES = new Set<AppLanguage>(['en', 'vi', 'zh-TW', 'ja']);
@@ -864,6 +868,20 @@ export function savePreferences(prefs: AppPreferences): void {
     window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch {
     // Ignore storage quota errors
+  }
+}
+
+/**
+ * Resets ONLY stored app preferences while preserving user profile and saved match history.
+ */
+export function resetStoredPreferences(
+  storage: Pick<Storage, 'removeItem'> | null = typeof window !== 'undefined' ? window.localStorage : null
+): void {
+  if (!storage) return;
+  try {
+    storage.removeItem(PREFERENCES_STORAGE_KEY);
+  } catch {
+    // Ignore storage access failures
   }
 }
 

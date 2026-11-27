@@ -89,6 +89,45 @@ export function resumeClockState(state: ClockState, activeTurn: Color, nowMs: nu
   };
 }
 
+export interface PreMoveClockCheck {
+  allowed: boolean;
+  expiredColor: Color | null;
+  nextState: ClockState;
+}
+
+/**
+ * Verifies BEFORE committing a move that the moving side still has time remaining.
+ * If the mover's clock has already expired (e.g. between UI ticks or after tab throttling),
+ * the move is rejected and the clock is paused at 0 for the flagged side without increment.
+ */
+export function checkClockBeforeMove(
+  state: ClockState,
+  movingColor: Color,
+  nowMs: number
+): PreMoveClockCheck {
+  const remaining = getClockRemaining(state, nowMs);
+  const moverRemaining = movingColor === 'w' ? remaining.w : remaining.b;
+
+  if (moverRemaining <= 0 || remaining.expiredColor === movingColor) {
+    return {
+      allowed: false,
+      expiredColor: movingColor,
+      nextState: {
+        w: movingColor === 'w' ? 0 : remaining.w,
+        b: movingColor === 'b' ? 0 : remaining.b,
+        activeTurn: state.activeTurn,
+        turnStartedAtMs: null,
+      },
+    };
+  }
+
+  return {
+    allowed: true,
+    expiredColor: null,
+    nextState: state,
+  };
+}
+
 /**
  * Commits elapsed time on the mover's clock when a move is played, applies increment if not flagged,
  * and starts the opponent's turn timestamp immediately at `nowMs` (unless the game ended).
@@ -107,9 +146,9 @@ export function commitMoveClock(
   if (movedRemaining <= 0) {
     return {
       nextState: {
-        w: remaining.w,
-        b: remaining.b,
-        activeTurn: nextTurn,
+        w: movedColor === 'w' ? 0 : remaining.w,
+        b: movedColor === 'b' ? 0 : remaining.b,
+        activeTurn: movedColor,
         turnStartedAtMs: null,
       },
       expiredColor: movedColor,

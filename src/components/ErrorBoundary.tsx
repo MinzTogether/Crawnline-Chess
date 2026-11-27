@@ -1,4 +1,5 @@
 import React from 'react';
+import { resetStoredPreferences } from '../types/preferences';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -35,13 +36,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   };
 
   private handleResetAndReload = () => {
-    try {
-      window.localStorage.removeItem('crownline_preferences_v1');
-      window.localStorage.removeItem('crownline_profile_v1');
-      window.localStorage.removeItem('crownline_matches_v1');
-    } catch {
-      // Ignore storage access failures
-    }
+    resetStoredPreferences();
     window.location.reload();
   };
 

@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_PREFERENCES,
   DEFAULT_PROFILE,
+  MATCHES_STORAGE_KEY,
+  PREFERENCES_STORAGE_KEY,
+  PROFILE_STORAGE_KEY,
   SEEDED_MATCHES,
+  resetStoredPreferences,
   sanitizePreferences,
   sanitizeProfile,
   sanitizeSavedMatches,
@@ -126,4 +130,24 @@ test('sanitizeSavedMatches filters corrupted records, caps at 25, and falls back
   assert.equal(cleaned[0].userSide, undefined);
   assert.equal(cleaned[1].result, '1-0');
   assert.equal(cleaned[1].userSide, 'w');
+});
+
+test('resetStoredPreferences removes only preferences and preserves profile and saved matches', () => {
+  const store = new Map<string, string>([
+    [PREFERENCES_STORAGE_KEY, '{"appTheme":"chesscom-dark"}'],
+    [PROFILE_STORAGE_KEY, '{"displayName":"Magnus"}'],
+    [MATCHES_STORAGE_KEY, '[{"id":"m1","pgn":"1. e4 e5"}]'],
+  ]);
+
+  const fakeStorage = {
+    removeItem(key: string) {
+      store.delete(key);
+    },
+  };
+
+  resetStoredPreferences(fakeStorage);
+
+  assert.equal(store.has(PREFERENCES_STORAGE_KEY), false);
+  assert.equal(store.get(PROFILE_STORAGE_KEY), '{"displayName":"Magnus"}');
+  assert.equal(store.get(MATCHES_STORAGE_KEY), '[{"id":"m1","pgn":"1. e4 e5"}]');
 });

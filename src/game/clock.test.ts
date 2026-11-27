@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  checkClockBeforeMove,
   commitMoveClock,
   createClockState,
   getClockRemaining,
@@ -81,4 +82,61 @@ test('quantizeClockDisplay buckets >=10s to whole seconds and <10s to tenths', (
   assert.equal(quantizeClockDisplay(0), 0);
   assert.equal(quantizeClockDisplay(-2.5), 0);
   assert.equal(quantizeClockDisplay(Number.NaN), 0);
+});
+
+test('checkClockBeforeMove rejects move when mover clock expired between ticks and pauses clock at 0', () => {
+  const t0 = 10_000_000;
+  const running = createClockState(5, 'w', t0);
+
+  // White attempts a move 5.25s later (250ms after flagging, before next timer tick)
+  const check = checkClockBeforeMove(running, 'w', t0 + 5250);
+  assert.equal(check.allowed, false);
+  assert.equal(check.expiredColor, 'w');
+  assert.equal(check.nextState.w, 0);
+  assert.equal(check.nextState.b, 5);
+  assert.equal(check.nextState.turnStartedAtMs, null);
+});
+
+test('checkClockBeforeMove allows move when mover still has positive time left', () => {
+  const t0 = 11_000_000;
+  const running = createClockState(5, 'w', t0);
+
+  // White moves with 50ms remaining -> allowed
+  const check = checkClockBeforeMove(running, 'w', t0 + 4950);
+  assert.equal(check.allowed, true);
+  assert.equal(check.expiredColor, null);
+});
+
+test('commitMoveClock does not award increment when mover has already flagged on time', () => {
+  const t0 = 12_000_000;
+  const running = createClockState(3, 'b', t0);
+
+  // Black tries to move after 3.4s with a +5s increment time control
+  const res = commitMoveClock(running, 'b', 'w', 5, t0 + 3400, false);
+  assert.equal(res.expiredColor, 'b');
+  assert.equal(res.nextState.b, 0);
+  assert.equal(res.nextState.w, 3);
+  assert.equal(res.nextState.activeTurn, 'b');
+  assert.equal(res.nextState.turnStartedAtMs, null);
+});
+
+test('multi-turn timeout flow rejects Black move after flagging while preserving White clock', () => {
+  const t0 = 15_000_000;
+  const initial = createClockState(10, 'w', t0);
+
+  // White moves after 2.0s with +1s increment -> White has 9.0s, Black starts ticking at t0 + 2000
+  const whiteCheck = checkClockBeforeMove(initial, 'w', t0 + 2000);
+  assert.equal(whiteCheck.allowed, true);
+  const afterWhite = commitMoveClock(initial, 'w', 'b', 1, t0 + 2000, false);
+  assert.equal(afterWhite.expiredColor, null);
+  assert.equal(afterWhite.nextState.w, 9);
+  assert.equal(afterWhite.nextState.b, 10);
+
+  // Black thinks for 10.1s -> Black's pre-move check MUST reject the move before commit
+  const blackCheck = checkClockBeforeMove(afterWhite.nextState, 'b', t0 + 12_100);
+  assert.equal(blackCheck.allowed, false);
+  assert.equal(blackCheck.expiredColor, 'b');
+  assert.equal(blackCheck.nextState.w, 9);
+  assert.equal(blackCheck.nextState.b, 0);
+  assert.equal(blackCheck.nextState.turnStartedAtMs, null);
 });

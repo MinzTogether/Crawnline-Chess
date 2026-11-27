@@ -47,6 +47,7 @@ import {
   stripCastlingRights,
 } from './game/chessLogic';
 import {
+  checkClockBeforeMove,
   commitMoveClock,
   createClockState,
   getClockRemaining,
@@ -55,6 +56,7 @@ import {
   resumeClockState,
   type ClockState,
 } from './game/clock';
+import { executeMatchReviewPass } from './game/matchReview';
 import { generateRandomChessFen, generateStandardRandomFen } from './game/customPosition';
 import { createChess960Position } from './game/chess960';
 import { detectOpening } from './game/openings';
@@ -199,6 +201,7 @@ export default function App() {
       window.clearTimeout(delayedReviewTimerRef.current);
       delayedReviewTimerRef.current = null;
     }
+    analyzerRef.current?.stop();
     setIsReviewing(false);
   }, []);
 
@@ -411,7 +414,11 @@ export default function App() {
       }
 
       cancelOngoingReview();
-      opponentRef.current?.cancel();
+      if (cfg.mode === 'stockfish') {
+        opponentRef.current?.cancel();
+      } else {
+        opponentRef.current?.terminate();
+      }
       analyzerRef.current?.stop();
 
       setActiveMode(cfg.mode);
@@ -475,6 +482,21 @@ export default function App() {
 
       const baseMoves = isViewingLatest ? moves : moves.slice(0, viewPly);
       const baseFen = baseMoves.length > 0 ? baseMoves[baseMoves.length - 1].fenAfter : initialFen;
+      const movingColor: Color = baseFen.split(' ')[1] === 'b' ? 'b' : 'w';
+      const moveNowMs = Date.now();
+
+      // Check clock BEFORE applying or committing the move so flagged players cannot play after timeout
+      if (activeMode !== 'analysis' && clockRef.current !== null) {
+        const preCheck = checkClockBeforeMove(clockRef.current, movingColor, moveNowMs);
+        if (!preCheck.allowed) {
+          clockRef.current = preCheck.nextState;
+          setWhiteClock(quantizeClockDisplay(preCheck.nextState.w));
+          setBlackClock(quantizeClockDisplay(preCheck.nextState.b));
+          setTimeoutLoser(preCheck.expiredColor);
+          playChessSound('gameover', preferences.muted);
+          return false;
+        }
+      }
 
       const prevAnalysis = latestAnalysisRef.current;
       const bestBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.bestMoveUci ?? undefined : undefined;
@@ -495,6 +517,31 @@ export default function App() {
       }
 
       const movedColor = applied.color;
+      const gameEnded = applied.isCheckmate || applied.isDraw;
+
+      // Compute & verify final clock commit BEFORE mutating moves state
+      let committedClock: ClockState | null = null;
+      if (activeMode !== 'analysis' && clockRef.current !== null) {
+        const nextTurn: Color = movedColor === 'w' ? 'b' : 'w';
+        const { nextState, expiredColor } = commitMoveClock(
+          clockRef.current,
+          movedColor,
+          nextTurn,
+          incrementSec,
+          moveNowMs,
+          gameEnded
+        );
+        if (expiredColor) {
+          clockRef.current = nextState;
+          setWhiteClock(quantizeClockDisplay(nextState.w));
+          setBlackClock(quantizeClockDisplay(nextState.b));
+          setTimeoutLoser(expiredColor);
+          playChessSound('gameover', preferences.muted);
+          return false;
+        }
+        committedClock = nextState;
+      }
+
       const newRecord: MoveRecord = {
         ply: baseMoves.length + 1,
         moveNumber: applied.moveNumber,
@@ -535,31 +582,14 @@ export default function App() {
       if (isReviewing) {
         cancelOngoingReview();
       }
+      if (committedClock !== null) {
+        clockRef.current = committedClock;
+        setWhiteClock(quantizeClockDisplay(committedClock.w));
+        setBlackClock(quantizeClockDisplay(committedClock.b));
+      }
       setMoves(nextMoves);
       setViewPly(nextMoves.length);
       setHintArrow(null);
-
-      // Commit elapsed timestamp on mover's clock, add increment, and start next turn timestamp
-      if (activeMode !== 'analysis' && clockRef.current !== null) {
-        const nextTurn: Color = movedColor === 'w' ? 'b' : 'w';
-        const gameEnded = applied.isCheckmate || applied.isDraw;
-        const { nextState, expiredColor } = commitMoveClock(
-          clockRef.current,
-          movedColor,
-          nextTurn,
-          incrementSec,
-          Date.now(),
-          gameEnded
-        );
-        clockRef.current = nextState;
-        setWhiteClock(quantizeClockDisplay(nextState.w));
-        setBlackClock(quantizeClockDisplay(nextState.b));
-        if (expiredColor) {
-          setTimeoutLoser(expiredColor);
-          playChessSound('gameover', preferences.muted);
-          return true;
-        }
-      }
 
       playChessSound(soundKind, preferences.muted);
       return true;
@@ -628,8 +658,17 @@ export default function App() {
 
   // Real-time Stockfish Analysis Worker trigger whenever viewedFen changes
   useEffect(() => {
-    if (appState === 'title' || !engineEnabled || isReviewing) {
-      analyzerRef.current?.stop();
+    if (appState === 'title') {
+      analyzerRef.current?.terminate();
+      return;
+    }
+    if (isReviewing) {
+      // Game Review owns the analyzer worker; do not stop or terminate it here.
+      return;
+    }
+    if (!engineEnabled) {
+      analyzerRef.current?.terminate();
+      setEngineAnalysis((prev) => (prev ? { ...prev, isSearching: false } : prev));
       return;
     }
 
@@ -726,9 +765,17 @@ export default function App() {
               return updated;
             });
           }
+        },
+        () => {
+          if (cancelled) return;
+          // Engine fault: stop spinning indicator without injecting any fake 0.00 evaluation
+          setEngineAnalysis((prev) => (prev ? { ...prev, isSearching: false } : prev));
         }
       )
-      .catch(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        setEngineAnalysis((prev) => (prev ? { ...prev, isSearching: false } : prev));
+      });
 
     return () => {
       cancelled = true;
@@ -880,66 +927,37 @@ export default function App() {
       setRightTab('rating');
 
       const analyzer = ensureAnalyzer();
-      const reviewed: MoveRecord[] = [...targetMoves];
 
       try {
-        let prevResult = await analyzer.evaluateOnce(targetInitialFen, 10, {
-          chess960: false,
-          engineFen: targetInitialFen,
+        const result = await executeMatchReviewPass({
+          initialFen: targetInitialFen,
+          moves: targetMoves,
+          isStandardVariant,
+          depth: 10,
+          evaluatePosition: (fen, depth) =>
+            analyzer.evaluateOnce(fen, depth, {
+              chess960: false,
+              engineFen: fen,
+            }),
+          isCancelled: () => reviewRunIdRef.current !== runId,
+          onMoveReviewed: ({ reviewedMoves, progressPct, fen, score, depth }) => {
+            if (reviewRunIdRef.current !== runId) return;
+            const cacheKey = positionKeyFromFen(fen);
+            if (evalCacheRef.current.has(cacheKey)) {
+              evalCacheRef.current.delete(cacheKey);
+            } else if (evalCacheRef.current.size >= MAX_EVAL_CACHE_SIZE) {
+              const oldestKey = evalCacheRef.current.keys().next().value;
+              if (oldestKey !== undefined) evalCacheRef.current.delete(oldestKey);
+            }
+            evalCacheRef.current.set(cacheKey, { score, depth });
+            setReviewProgress(progressPct);
+            setMoves(reviewedMoves);
+          },
         });
-        if (reviewRunIdRef.current !== runId) return;
-
-        for (let i = 0; i < reviewed.length; i++) {
-          const m = reviewed[i];
-          const afterResult = await analyzer.evaluateOnce(m.fenAfter, 10, {
-            chess960: false,
-            engineFen: m.fenAfter,
-          });
-          if (reviewRunIdRef.current !== runId) return;
-
-          const isBook =
-            isStandardVariant &&
-            i < 6 &&
-            Boolean(detectOpening(reviewed.slice(0, i + 1).map((x) => x.san)));
-
-          const classified = classifyMove({
-            evalBefore: prevResult.score,
-            evalAfter: afterResult.score,
-            mover: m.color,
-            playedUci: m.uci,
-            bestUci: prevResult.bestMove,
-            isBook,
-            isSacrifice: isTacticalPieceSacrifice(m),
-          });
-
-          const cacheKey = positionKeyFromFen(m.fenAfter);
-          if (evalCacheRef.current.has(cacheKey)) {
-            evalCacheRef.current.delete(cacheKey);
-          } else if (evalCacheRef.current.size >= MAX_EVAL_CACHE_SIZE) {
-            const oldestKey = evalCacheRef.current.keys().next().value;
-            if (oldestKey !== undefined) evalCacheRef.current.delete(oldestKey);
-          }
-          evalCacheRef.current.set(cacheKey, {
-            score: afterResult.score,
-            depth: 10,
-          });
-
-          reviewed[i] = {
-            ...m,
-            bestMoveBefore: prevResult.bestMove ?? m.bestMoveBefore,
-            evalAfter: afterResult.score,
-            classification: classified.classification,
-            accuracy: classified.accuracy,
-          };
-
-          prevResult = afterResult;
-          setReviewProgress(Math.round(((i + 1) / reviewed.length) * 100));
-          setMoves([...reviewed]);
-        }
 
         // Update saved match entry with exact Stockfish accuracy & Game Elo
-        if (matchIdToUpdate && reviewRunIdRef.current === runId) {
-          const report = buildMatchRatingReport(reviewed);
+        if (result.completed && matchIdToUpdate && reviewRunIdRef.current === runId) {
+          const report = buildMatchRatingReport(result.reviewedMoves);
           setSavedMatches((prev) =>
             prev.map((item) =>
               item.id === matchIdToUpdate
@@ -1015,7 +1033,7 @@ export default function App() {
       if (!parsed.ok) return parsed;
 
       cancelOngoingReview();
-      opponentRef.current?.cancel();
+      opponentRef.current?.terminate();
       analyzerRef.current?.stop();
       setIsBotThinking(false);
 
@@ -1276,8 +1294,8 @@ export default function App() {
   const returnToHub = useCallback(
     (targetSection: HubSection) => {
       cancelOngoingReview();
-      opponentRef.current?.cancel();
-      analyzerRef.current?.stop();
+      opponentRef.current?.terminate();
+      analyzerRef.current?.terminate();
       clockRef.current = null;
       setHubSection(targetSection);
       setAppState('title');
