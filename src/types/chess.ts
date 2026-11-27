@@ -827,6 +827,15 @@ export interface MoveRecord {
   promotion?: PieceSymbol;
   fenBefore: string;
   fenAfter: string;
+  /** Shredder-FEN for Stockfish UCI_Chess960 when playing Chess960 */
+  engineFenAfter?: string;
+  /** Chess960 castling rook files remaining after this move */
+  castlingRights960?: {
+    wK: number | null;
+    wQ: number | null;
+    bK: number | null;
+    bQ: number | null;
+  };
   evalAfter?: EvalScore;
   bestMoveBefore?: string;
   classification?: MoveClassification;
@@ -862,7 +871,9 @@ export interface GameTermination {
   resultString: '1-0' | '0-1' | '1/2-1/2' | '*';
 }
 
-export type MatchVariant = 'standard' | 'custom' | 'random';
+export type MatchVariant = 'standard' | 'custom' | 'random' | 'chess960';
+
+export type RandomChessStyle = 'all' | 'standard';
 
 export interface MatchSettings {
   mode: GameMode;
@@ -870,5 +881,7 @@ export interface MatchSettings {
   stockfishLevelId: string;
   timeControlId: string;
   variant?: MatchVariant;
+  randomStyle?: RandomChessStyle;
+  chess960Id?: number | null;
   customFen?: string;
 }

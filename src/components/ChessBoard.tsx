@@ -9,6 +9,7 @@ import {
   type MoveClassification,
 } from '../types/chess';
 import type { PieceStyleId } from '../types/preferences';
+import { getChess960LegalTargets, type Chess960CastlingRights } from '../game/chess960';
 import { ChessPiece } from './ChessPieces';
 import { EvalBar } from './EvalBar';
 import { MoveBadge } from './MoveBadge';
@@ -41,6 +42,7 @@ interface ChessBoardProps {
   evalScore: EvalScore | null;
   evalDepth?: number;
   evalStabilizing?: boolean;
+  chess960Rights?: Chess960CastlingRights | null;
   onMove: (from: Square, to: Square, promotion?: PieceSymbol) => boolean;
 }
 
@@ -67,6 +69,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   evalScore,
   evalDepth = 0,
   evalStabilizing = false,
+  chess960Rights = null,
   onMove,
 }) => {
   const { t } = useI18n();
@@ -128,9 +131,21 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   // Compute legal destinations for the selected or dragged piece
   const activeSource = draggingFrom ?? selectedSquare;
   const legalTargets = useMemo(() => {
-    const map = new Map<Square, { isCapture: boolean; isPromotion: boolean }>();
+    const map = new Map<Square, { isCapture: boolean; isPromotion: boolean; isCastle?: boolean }>();
     if (!activeSource || !interactive) return map;
     if (allowedTurn !== 'both' && turn !== allowedTurn) return map;
+
+    if (chess960Rights) {
+      const targets960 = getChess960LegalTargets(fen, chess960Rights, activeSource);
+      targets960.forEach((meta, targetSq) => {
+        map.set(targetSq, {
+          isCapture: meta.isCapture,
+          isPromotion: meta.isPromotion,
+          isCastle: meta.isCastle,
+        });
+      });
+      return map;
+    }
 
     const moves = chess.moves({ square: activeSource, verbose: true });
     for (const m of moves) {
@@ -140,7 +155,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
       });
     }
     return map;
-  }, [activeSource, chess, interactive, allowedTurn, turn]);
+  }, [activeSource, chess, fen, chess960Rights, interactive, allowedTurn, turn]);
 
   const orderedRanks = orientation === 'w' ? RANKS : [...RANKS].reverse();
   const orderedFiles = orientation === 'w' ? FILES : [...FILES].reverse();
@@ -155,6 +170,28 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   const attemptMove = (from: Square, to: Square) => {
     const piece = chess.get(from);
     if (!piece) return false;
+
+    if (chess960Rights) {
+      const targets960 = getChess960LegalTargets(fen, chess960Rights, from);
+      const targetMeta = targets960.get(to);
+      if (!targetMeta) return false;
+
+      if (targetMeta.isPromotion) {
+        setPendingPromotion({ from, to, color: piece.color });
+        setSelectedSquare(null);
+        setDraggingFrom(null);
+        setDragPos(null);
+        return true;
+      }
+
+      const ok = onMove(from, to);
+      if (ok) {
+        setSelectedSquare(null);
+        setUserArrows([]);
+        setMarkedSquares(new Set());
+      }
+      return ok;
+    }
 
     const legal = chess.moves({ square: from, verbose: true }).filter((m) => m.to === to);
     if (legal.length === 0) return false;
@@ -384,13 +421,16 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                     </span>
                   )}
 
-                  {/* Legal move dot or capture ring */}
+                  {/* Legal move dot, capture ring, or Chess960 castling ring */}
                   {showLegalMoves && targetMeta && (
                     <span
+                      data-castle-target={targetMeta.isCastle ? 'true' : undefined}
                       className={
-                        targetMeta.isCapture
-                          ? 'absolute inset-[7%] rounded-full border-[5px] sm:border-[6px] border-black/22 pointer-events-none z-10 anim-dot-pop'
-                          : 'w-[30%] h-[30%] rounded-full bg-black/22 pointer-events-none z-10 anim-dot-pop'
+                        targetMeta.isCastle && piece
+                          ? 'absolute inset-[7%] rounded-full border-[5px] sm:border-[6px] border-[#81B64C]/85 pointer-events-none z-20 anim-dot-pop'
+                          : targetMeta.isCapture
+                            ? 'absolute inset-[7%] rounded-full border-[5px] sm:border-[6px] border-black/22 pointer-events-none z-10 anim-dot-pop'
+                            : 'w-[30%] h-[30%] rounded-full bg-black/22 pointer-events-none z-10 anim-dot-pop'
                       }
                     />
                   )}

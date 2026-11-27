@@ -1,6 +1,7 @@
 import type { Color } from 'chess.js';
 import type { EngineAnalysis, EngineLine, EvalScore, StockfishLevel } from '../types/chess';
 import { uciLineToSan } from '../game/chessLogic';
+import { uciLineToSan960, type Chess960CastlingRights } from '../game/chess960';
 import { parseBestMoveLine, parseUciInfoLine } from './uciParser';
 
 function detectWasmSupport(): boolean {
@@ -25,6 +26,10 @@ function getTurnFromFen(fen: string): Color {
 
 interface PendingJob {
   fen: string;
+  /** Shredder-FEN sent to Stockfish when chess960 is true */
+  engineFen: string;
+  chess960: boolean;
+  chess960Rights?: Chess960CastlingRights;
   depth: number;
   multiPv: number;
   mode: 'stream' | 'single';
@@ -48,6 +53,7 @@ export class StockfishAnalyzer {
   private activeJob: PendingJob | null = null;
   private queuedJob: PendingJob | null = null;
   private currentMultiPv = 1;
+  private currentChess960 = false;
 
   private linesMap = new Map<number, EngineLine>();
   private latestDepth = 0;
@@ -158,6 +164,10 @@ export class StockfishAnalyzer {
       this.currentMultiPv = job.multiPv;
       this.worker.postMessage(`setoption name MultiPV value ${job.multiPv}`);
     }
+    if (job.chess960 !== this.currentChess960) {
+      this.currentChess960 = job.chess960;
+      this.worker.postMessage(`setoption name UCI_Chess960 value ${job.chess960 ? 'true' : 'false'}`);
+    }
 
     this.phase = 'syncing';
     this.worker.postMessage('isready');
@@ -179,7 +189,7 @@ export class StockfishAnalyzer {
         }
         if (this.activeJob && this.worker) {
           this.phase = 'searching';
-          this.worker.postMessage(`position fen ${this.activeJob.fen}`);
+          this.worker.postMessage(`position fen ${this.activeJob.engineFen}`);
           this.worker.postMessage(`go depth ${this.activeJob.depth}`);
         } else {
           this.phase = 'idle';
@@ -230,7 +240,10 @@ export class StockfishAnalyzer {
       const sideToMove = getTurnFromFen(this.activeJob.fen);
       const parsedInfo = parseUciInfoLine(trimmed, sideToMove);
       if (parsedInfo) {
-        parsedInfo.pvSan = uciLineToSan(this.activeJob.fen, parsedInfo.pvUci, 10);
+        parsedInfo.pvSan =
+          this.activeJob.chess960 && this.activeJob.chess960Rights
+            ? uciLineToSan960(this.activeJob.fen, this.activeJob.chess960Rights, parsedInfo.pvUci, 10)
+            : uciLineToSan(this.activeJob.fen, parsedInfo.pvUci, 10);
         if (parsedInfo.multipv <= this.activeJob.multiPv) {
           this.linesMap.set(parsedInfo.multipv, parsedInfo);
         }
@@ -288,7 +301,13 @@ export class StockfishAnalyzer {
 
   async analyzePosition(
     fen: string,
-    options: { depth: number; multiPv: number },
+    options: {
+      depth: number;
+      multiPv: number;
+      chess960?: boolean;
+      engineFen?: string;
+      chess960Rights?: Chess960CastlingRights;
+    },
     onUpdate: (analysis: EngineAnalysis) => void
   ): Promise<void> {
     await this.init();
@@ -296,6 +315,9 @@ export class StockfishAnalyzer {
 
     this.scheduleJob({
       fen,
+      engineFen: options.engineFen ?? fen,
+      chess960: Boolean(options.chess960),
+      chess960Rights: options.chess960Rights,
       depth: Math.max(8, Math.min(22, options.depth)),
       multiPv: Math.max(1, Math.min(3, options.multiPv)),
       mode: 'stream',
@@ -303,13 +325,20 @@ export class StockfishAnalyzer {
     });
   }
 
-  async evaluateOnce(fen: string, depth = 11): Promise<{ score: EvalScore; bestMove: string | null }> {
+  async evaluateOnce(
+    fen: string,
+    depth = 11,
+    options?: { chess960?: boolean; engineFen?: string; chess960Rights?: Chess960CastlingRights }
+  ): Promise<{ score: EvalScore; bestMove: string | null }> {
     await this.init();
     if (!this.worker) return { score: { type: 'cp', value: 0 }, bestMove: null };
 
     return new Promise((resolve) => {
       this.scheduleJob({
         fen,
+        engineFen: options?.engineFen ?? fen,
+        chess960: Boolean(options?.chess960),
+        chess960Rights: options?.chess960Rights,
         depth: Math.max(6, Math.min(18, depth)),
         multiPv: 1,
         mode: 'single',
@@ -352,7 +381,13 @@ export class StockfishOpponent {
   private initPromise: Promise<void> | null = null;
   private resolver: ((uciMove: string | null) => void) | null = null;
   private isSearching = false;
-  private pendingMove: { fen: string; level: StockfishLevel; resolve: (m: string | null) => void } | null = null;
+  private currentChess960 = false;
+  private pendingMove: {
+    fen: string;
+    level: StockfishLevel;
+    chess960: boolean;
+    resolve: (m: string | null) => void;
+  } | null = null;
 
   async init(): Promise<void> {
     if (this.isReady && this.worker) return;
@@ -407,10 +442,14 @@ export class StockfishOpponent {
 
   private startPending() {
     if (!this.worker || !this.pendingMove) return;
-    const { fen, level, resolve } = this.pendingMove;
+    const { fen, level, chess960, resolve } = this.pendingMove;
     this.pendingMove = null;
     this.resolver = resolve;
     this.isSearching = true;
+    if (chess960 !== this.currentChess960) {
+      this.currentChess960 = chess960;
+      this.worker.postMessage(`setoption name UCI_Chess960 value ${chess960 ? 'true' : 'false'}`);
+    }
     this.worker.postMessage(`setoption name Skill Level value ${level.skillLevel}`);
     this.worker.postMessage(`position fen ${fen}`);
     this.worker.postMessage(`go depth ${level.depthCap} movetime ${level.moveTimeMs}`);
@@ -432,7 +471,7 @@ export class StockfishOpponent {
     }
   };
 
-  async computeMove(fen: string, level: StockfishLevel): Promise<string | null> {
+  async computeMove(fen: string, level: StockfishLevel, chess960 = false): Promise<string | null> {
     await this.init();
     if (!this.worker) return null;
 
@@ -440,7 +479,7 @@ export class StockfishOpponent {
       if (this.pendingMove) {
         this.pendingMove.resolve(null);
       }
-      this.pendingMove = { fen, level, resolve };
+      this.pendingMove = { fen, level, chess960, resolve };
 
       if (this.isSearching) {
         if (this.resolver) {

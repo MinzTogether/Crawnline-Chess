@@ -316,16 +316,46 @@ export function generateRandomChessFen(rng: () => number = Math.random): string 
     }
   }
 
-  // Deterministic safe fallback: independently shuffle White back rank & Black back rank + pawns on ranks 2-3 / 6-7
-  const backPieces: PieceSymbol[] = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
-  const wBack = shuffleArray(backPieces, rng);
-  const bBack = shuffleArray(backPieces, rng);
-  const fallbackBoard: BoardMap = {};
-  BOARD_FILES.forEach((f, idx) => {
-    fallbackBoard[`${f}1` as Square] = { type: wBack[idx], color: 'w' };
-    fallbackBoard[`${f}2` as Square] = { type: 'p', color: 'w' };
-    fallbackBoard[`${f}7` as Square] = { type: 'p', color: 'b' };
-    fallbackBoard[`${f}8` as Square] = { type: bBack[idx], color: 'b' };
-  });
-  return boardMapToFen(fallbackBoard, 'w', false);
+  // Deterministic safe fallback: independently shuffle White back rank & Black back rank
+  return generateStandardRandomFen(rng);
 }
+
+const STANDARD_BACK_RANK_ORDER: PieceSymbol[] = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
+
+function isSameBackRank(a: PieceSymbol[], b: PieceSymbol[]): boolean {
+  return a.length === b.length && a.every((p, idx) => p === b[idx]);
+}
+
+/**
+ * Generates a Standard Random FEN where White and Black back-rank starting pieces
+ * are randomly swapped on ranks 1 and 8 (no Chess960 bishop/king restrictions)
+ * while pawns remain on ranks 2 and 7.
+ */
+export function generateStandardRandomFen(rng: () => number = Math.random): string {
+  let wBack = shuffleArray(STANDARD_BACK_RANK_ORDER, rng);
+  let bBack = shuffleArray(STANDARD_BACK_RANK_ORDER, rng);
+
+  // Guarantee at least one side differs from standard chess starting arrangement
+  for (let i = 0; i < 20; i++) {
+    if (!isSameBackRank(wBack, STANDARD_BACK_RANK_ORDER) || !isSameBackRank(bBack, STANDARD_BACK_RANK_ORDER)) {
+      break;
+    }
+    wBack = shuffleArray(STANDARD_BACK_RANK_ORDER, rng);
+    bBack = shuffleArray(STANDARD_BACK_RANK_ORDER, rng);
+  }
+  if (isSameBackRank(wBack, STANDARD_BACK_RANK_ORDER) && isSameBackRank(bBack, STANDARD_BACK_RANK_ORDER)) {
+    // Deterministic swap of knight and rook if RNG produced identical ordering
+    wBack = ['n', 'r', 'b', 'q', 'k', 'b', 'n', 'r'];
+  }
+
+  const board: BoardMap = {};
+  BOARD_FILES.forEach((f, idx) => {
+    board[`${f}1` as Square] = { type: wBack[idx], color: 'w' };
+    board[`${f}2` as Square] = { type: 'p', color: 'w' };
+    board[`${f}7` as Square] = { type: 'p', color: 'b' };
+    board[`${f}8` as Square] = { type: bBack[idx], color: 'b' };
+  });
+
+  return boardMapToFen(board, 'w', false);
+}
+

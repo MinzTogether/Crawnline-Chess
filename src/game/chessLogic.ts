@@ -281,11 +281,13 @@ export function buildPgn(params: {
   whiteName: string;
   blackName: string;
   result: '1-0' | '0-1' | '1/2-1/2' | '*';
+  variant?: 'Chess960';
+  pgnInitialFen?: string;
 }): string {
   const defaultFen = new Chess().fen();
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
   const lines: string[] = [
-    `[Event "Crownline Chess Match"]`,
+    `[Event "${params.variant === 'Chess960' ? 'Crownline Chess960 Match' : 'Crownline Chess Match'}"]`,
     `[Site "Crownline Chess"]`,
     `[Date "${dateStr}"]`,
     `[White "${params.whiteName}"]`,
@@ -293,9 +295,14 @@ export function buildPgn(params: {
     `[Result "${params.result}"]`,
   ];
 
-  if (params.initialFen !== defaultFen) {
+  if (params.variant === 'Chess960') {
+    lines.push(`[Variant "Chess960"]`);
+  }
+
+  const effectiveFen = params.pgnInitialFen ?? params.initialFen;
+  if (effectiveFen !== defaultFen || params.variant === 'Chess960') {
     lines.push(`[SetUp "1"]`);
-    lines.push(`[FEN "${params.initialFen}"]`);
+    lines.push(`[FEN "${effectiveFen}"]`);
   }
 
   lines.push('');

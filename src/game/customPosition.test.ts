@@ -7,6 +7,7 @@ import {
   createKingsOnlyBoard,
   fenToBoardMap,
   generateRandomChessFen,
+  generateStandardRandomFen,
   setSquarePiece,
   swapOrMoveSquare,
   validateCustomPosition,
@@ -87,4 +88,28 @@ test('generateRandomChessFen creates valid, non-standard, rule-free 32-piece che
     }
   }
   assert.ok(generated.size >= 10, 'Random Chess should generate distinct positions');
+});
+
+test('generateStandardRandomFen keeps pawns on ranks 2 & 7 and randomly swaps back-rank pieces', () => {
+  const generated = new Set<string>();
+  for (let i = 0; i < 15; i++) {
+    const fen = generateStandardRandomFen();
+    assert.notEqual(fen.split(' ')[0], STANDARD_START_FEN.split(' ')[0]);
+    generated.add(fen);
+
+    const chess = new Chess(fen);
+    assert.equal(chess.turn(), 'w');
+    assert.equal(chess.inCheck(), false);
+    assert.ok(chess.moves().length >= 16);
+
+    const map = fenToBoardMap(fen);
+    assert.equal(Object.keys(map).length, 32);
+    for (const file of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] as const) {
+      assert.deepEqual(map[`${file}2`], { type: 'p', color: 'w' });
+      assert.deepEqual(map[`${file}7`], { type: 'p', color: 'b' });
+      assert.equal(map[`${file}1`]?.color, 'w');
+      assert.equal(map[`${file}8`]?.color, 'b');
+    }
+  }
+  assert.ok(generated.size >= 10, 'Standard Random should generate varied back ranks');
 });

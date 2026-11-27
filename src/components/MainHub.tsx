@@ -19,11 +19,13 @@ import {
   Users,
 } from 'lucide-react';
 import {
+  BOARD_THEMES,
   STOCKFISH_LEVELS,
   TIME_CONTROLS,
   type GameMode,
   type MatchSettings,
   type PlayerSideChoice,
+  type RandomChessStyle,
 } from '../types/chess';
 import {
   type AppPreferences,
@@ -31,13 +33,16 @@ import {
   type UserProfile,
 } from '../types/preferences';
 import {
+  BOARD_FILES,
   STANDARD_START_FEN,
   fenToBoardMap,
   validateCustomPosition,
   type BoardMap,
 } from '../game/customPosition';
+import { createChess960Position, getChess960BackRank } from '../game/chess960';
 import { useI18n } from '../i18n/LanguageContext';
 import { AppLogoIcon } from './AppIcons';
+import { ChessPiece } from './ChessPieces';
 import { CustomBoardEditor } from './CustomBoardEditor';
 import { SettingsSection, type SettingsSubPage } from './SettingsSection';
 
@@ -47,6 +52,7 @@ type HomeStep =
   | 'stockfish-setup'
   | 'person-select'
   | 'person-offline-setup'
+  | 'chess960-setup'
   | 'custom-setup'
   | 'random-setup'
   | 'analysis-setup';
@@ -139,6 +145,14 @@ export const MainHub: React.FC<MainHubProps> = ({
   const [customBoard, setCustomBoard] = useState<BoardMap>(() => fenToBoardMap(STANDARD_START_FEN));
   const [customTurn, setCustomTurn] = useState<Color>('w');
   const [variantOpponent, setVariantOpponent] = useState<'stockfish' | 'local'>('stockfish');
+  const [randomStyle, setRandomStyle] = useState<RandomChessStyle>('all');
+  const [chess960RandomMode, setChess960RandomMode] = useState<boolean>(true);
+  const [chess960PreviewId, setChess960PreviewId] = useState<number>(() => createChess960Position().id);
+  const chess960PreviewRank = useMemo(
+    () => getChess960BackRank(chess960PreviewId),
+    [chess960PreviewId]
+  );
+  const previewBoardTheme = BOARD_THEMES[preferences.boardTheme] ?? BOARD_THEMES.tournament;
   const customValidation = useMemo(
     () => validateCustomPosition(customBoard, customTurn),
     [customBoard, customTurn]
@@ -468,6 +482,20 @@ export const MainHub: React.FC<MainHubProps> = ({
                           },
                         },
                         {
+                          id: 'chess960',
+                          testId: 'mode-card-chess960',
+                          title: t('modeChess960Title'),
+                          subtitle: t('modeChess960Desc'),
+                          meta: t('modeChess960Meta'),
+                          iconBg: 'rgba(232, 111, 81, 0.16)',
+                          iconColor: '#E86F51',
+                          icon: null as React.ComponentType<{ className?: string; style?: React.CSSProperties }> | null,
+                          badgeText: '960',
+                          onSelect: () => {
+                            setHomeStep('chess960-setup');
+                          },
+                        },
+                        {
                           id: 'custom',
                           testId: 'mode-card-custom',
                           title: t('modeCustomTitle'),
@@ -476,6 +504,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                           iconBg: 'rgba(217, 155, 60, 0.16)',
                           iconColor: '#D99B3C',
                           icon: SlidersHorizontal,
+                          badgeText: null as string | null,
                           onSelect: () => {
                             setHomeStep('custom-setup');
                           },
@@ -489,6 +518,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                           iconBg: 'rgba(156, 126, 230, 0.16)',
                           iconColor: '#9C7EE6',
                           icon: Shuffle,
+                          badgeText: null as string | null,
                           onSelect: () => {
                             setHomeStep('random-setup');
                           },
@@ -502,6 +532,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                           iconBg: 'rgba(27, 173, 166, 0.16)',
                           iconColor: '#1BADA6',
                           icon: Award,
+                          badgeText: null as string | null,
                           onSelect: () => {
                             onChangeMatchSettings({
                               ...matchSettings,
@@ -529,7 +560,16 @@ export const MainHub: React.FC<MainHubProps> = ({
                               className="w-13 h-13 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
                               style={{ backgroundColor: card.iconBg }}
                             >
-                              <Icon className="w-6 h-6" style={{ color: card.iconColor }} />
+                              {Icon ? (
+                                <Icon className="w-6 h-6" style={{ color: card.iconColor }} />
+                              ) : (
+                                <span
+                                  className="text-sm font-mono font-black tracking-tighter"
+                                  style={{ color: card.iconColor }}
+                                >
+                                  {'badgeText' in card ? card.badgeText : ''}
+                                </span>
+                              )}
                             </div>
                             <div className="min-w-0">
                               <div className="text-base sm:text-lg font-extrabold text-[var(--app-text)] leading-tight truncate">
@@ -1270,11 +1310,66 @@ export const MainHub: React.FC<MainHubProps> = ({
                     </div>
                   </div>
 
-                  {/* Rule-free Chaos Shuffle Summary */}
+                  {/* Random Chess Sub-Mode Selector: Random All vs Standard Random */}
+                  <div>
+                    <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                      {t('randomStyleHeading')}
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {(
+                        [
+                          {
+                            id: 'all' as RandomChessStyle,
+                            testId: 'random-style-all',
+                            title: t('randomStyleAllTitle'),
+                            desc: t('randomStyleAllDesc'),
+                          },
+                          {
+                            id: 'standard' as RandomChessStyle,
+                            testId: 'random-style-standard',
+                            title: t('randomStyleStandardTitle'),
+                            desc: t('randomStyleStandardDesc'),
+                          },
+                        ]
+                      ).map((opt) => {
+                        const selected = randomStyle === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            data-testid={opt.testId}
+                            aria-pressed={selected}
+                            onClick={() => setRandomStyle(opt.id)}
+                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer anim-interactive ${
+                              selected
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:border-[var(--app-border-strong)]'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-extrabold text-[var(--app-text)]">{opt.title}</span>
+                              <span
+                                className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${
+                                  selected
+                                    ? 'border-[var(--app-accent)] bg-[var(--app-accent)]'
+                                    : 'border-[var(--app-border-strong)]'
+                                }`}
+                              />
+                            </div>
+                            <p className="text-xs text-[var(--app-text-muted)] mt-1.5 leading-relaxed">{opt.desc}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Active Random Style Summary */}
                   <div className="p-3.5 rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border)]">
-                    <div className="text-xs font-bold text-[var(--app-text)]">{t('randomModeInfoTitle')}</div>
+                    <div className="text-xs font-bold text-[var(--app-text)]">
+                      {randomStyle === 'all' ? t('randomModeInfoTitle') : t('randomStandardInfoTitle')}
+                    </div>
                     <p className="text-xs text-[var(--app-text-muted)] mt-1 leading-relaxed">
-                      {t('randomModeInfoDesc')}
+                      {randomStyle === 'all' ? t('randomModeInfoDesc') : t('randomStandardInfoDesc')}
                     </p>
                   </div>
 
@@ -1411,12 +1506,302 @@ export const MainHub: React.FC<MainHubProps> = ({
                         ...matchSettings,
                         mode: variantOpponent,
                         variant: 'random',
+                        randomStyle,
                         customFen: undefined,
                       })
                     }
                     className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
                   >
                     <Shuffle className="w-4 h-4" />
+                    <span>{t('startMatch')}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ================= STEP: CHESS960 (FISCHER RANDOM — CHESS.COM RULES) ================= */}
+            {homeStep === 'chess960-setup' && (
+              <div
+                key="home-step-chess960"
+                className="max-w-[680px] w-full mx-auto flex flex-col gap-4 anim-view-enter"
+                data-testid="chess960-setup-view"
+              >
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setHomeStep('root')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer anim-interactive"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>{t('backToModes')}</span>
+                  </button>
+                </div>
+
+                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm">
+                  <div className="pb-4 border-b border-[var(--app-border)] flex items-center gap-3.5">
+                    <div
+                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
+                      style={{ backgroundColor: 'rgba(232, 111, 81, 0.16)' }}
+                    >
+                      <span className="text-sm font-mono font-black tracking-tighter text-[#E86F51]">960</span>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[var(--app-accent)]">{t('setupChess960Label')}</div>
+                      <h2 className="text-lg sm:text-xl font-extrabold text-[var(--app-text)] mt-0.5 truncate">
+                        {t('modeChess960Title')}
+                      </h2>
+                    </div>
+                  </div>
+
+                  {/* Chess.com Chess960 Rules Summary */}
+                  <div className="p-3.5 rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border)]">
+                    <div className="text-xs font-bold text-[var(--app-text)]">{t('chess960RulesTitle')}</div>
+                    <p className="text-xs text-[var(--app-text-muted)] mt-1 leading-relaxed">
+                      {t('chess960RulesDesc')}
+                    </p>
+                  </div>
+
+                  {/* Chess960 Starting Position Mode + Live Back-Rank Preview */}
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-[var(--app-text-muted)]">
+                        {t('chess960PositionLabel')}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          data-testid="chess960-mode-random"
+                          onClick={() => setChess960RandomMode(true)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer anim-interactive ${
+                            chess960RandomMode
+                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                              : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                          }`}
+                        >
+                          {t('chess960RandomEachMatch')}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="chess960-mode-custom-id"
+                          onClick={() => setChess960RandomMode(false)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer anim-interactive ${
+                            !chess960RandomMode
+                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                              : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                          }`}
+                        >
+                          {t('chess960CustomIdLabel')}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Visual Back-Rank Preview Strip */}
+                    <div className="p-3 rounded-xl bg-[var(--app-surface-2)] border border-[var(--app-border)] flex flex-col gap-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono font-bold text-[var(--app-text)]" data-testid="chess960-preview-id">
+                            SP #{chess960PreviewId}
+                          </span>
+                          <span className="text-[11px] font-mono uppercase tracking-widest text-[var(--app-text-muted)]">
+                            {chess960PreviewRank.join('')}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {!chess960RandomMode && (
+                            <input
+                              type="number"
+                              min={0}
+                              max={959}
+                              aria-label="Chess960 position number"
+                              data-testid="chess960-id-input"
+                              value={chess960PreviewId}
+                              onChange={(e) => {
+                                const parsed = parseInt(e.target.value, 10);
+                                if (!Number.isNaN(parsed)) {
+                                  setChess960PreviewId(Math.max(0, Math.min(959, parsed)));
+                                }
+                              }}
+                              className="w-16 px-2 py-1 rounded-md bg-[var(--app-surface)] border border-[var(--app-border-strong)] text-xs font-mono font-bold text-[var(--app-text)] text-center focus:outline-none focus:border-[var(--app-accent)]"
+                            />
+                          )}
+                          <button
+                            type="button"
+                            data-testid="chess960-reroll-btn"
+                            onClick={() => setChess960PreviewId(createChess960Position().id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-[11px] font-semibold text-[var(--app-text)] cursor-pointer anim-interactive"
+                          >
+                            <Shuffle className="w-3 h-3 text-[#E86F51]" />
+                            <span>{t('chess960RerollBtn')}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-8 rounded-md overflow-hidden ring-1 ring-white/10">
+                        {chess960PreviewRank.map((piece, idx) => {
+                          const isLight = idx % 2 === 1;
+                          return (
+                            <div
+                              key={`${BOARD_FILES[idx]}-${idx}`}
+                              className="relative aspect-square flex items-center justify-center p-1"
+                              style={{ backgroundColor: isLight ? previewBoardTheme.light : previewBoardTheme.dark }}
+                            >
+                              <div className="w-[88%] h-[88%]">
+                                <ChessPiece type={piece} color="w" pieceStyle={preferences.pieceStyle} />
+                              </div>
+                              <span
+                                className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold leading-none opacity-85"
+                                style={{ color: isLight ? previewBoardTheme.coordLight : previewBoardTheme.coordDark }}
+                              >
+                                {BOARD_FILES[idx]}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Opponent Selector */}
+                  <div>
+                    <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                      {t('opponentLabel')}
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          { id: 'stockfish', label: t('opponentStockfish') },
+                          { id: 'local', label: t('opponentOffline') },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          data-testid={`chess960-opponent-${opt.id}`}
+                          onClick={() => setVariantOpponent(opt.id)}
+                          className={`px-3 py-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
+                            variantOpponent === opt.id
+                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                              : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Stockfish Strength */}
+                  {variantOpponent === 'stockfish' && (
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
+                        <span className="text-xs font-semibold text-[var(--app-text-muted)]">
+                          {t('stockfishStrength')}
+                        </span>
+                        <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)] whitespace-nowrap">
+                          {activeLevel.name} · {activeLevel.elo}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {STOCKFISH_LEVELS.map((lvl) => {
+                          const selected = lvl.id === matchSettings.stockfishLevelId;
+                          return (
+                            <button
+                              key={lvl.id}
+                              type="button"
+                              onClick={() =>
+                                onChangeMatchSettings({ ...matchSettings, stockfishLevelId: lvl.id })
+                              }
+                              className={`py-2.5 px-2.5 rounded-lg text-left border transition-colors cursor-pointer anim-interactive ${
+                                selected
+                                  ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                  : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                              }`}
+                            >
+                              <div className="text-xs font-mono font-bold tabular-nums">{lvl.elo}</div>
+                              <div className="text-[11px] truncate opacity-85">{lvl.name}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Time Control */}
+                  <div>
+                    <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                      {t('timeControl')}
+                    </span>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {TIME_CONTROLS.map((tc) => {
+                        const selected = tc.id === matchSettings.timeControlId;
+                        return (
+                          <button
+                            key={tc.id}
+                            type="button"
+                            onClick={() =>
+                              onChangeMatchSettings({ ...matchSettings, timeControlId: tc.id })
+                            }
+                            className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap truncate cursor-pointer anim-interactive ${
+                              tc.id === 'unlimited' ? 'col-span-2' : ''
+                            } ${
+                              selected
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                            }`}
+                          >
+                            {tc.id === 'unlimited' ? t('unlimited') : tc.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Play As */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-[var(--app-text-muted)]">{t('playAs')}</span>
+                    <div className="grid grid-cols-3 gap-1.5 flex-1 min-w-[190px] max-w-[280px]">
+                      {(
+                        [
+                          { id: 'w', label: t('white') },
+                          { id: 'random', label: t('random') },
+                          { id: 'b', label: t('black') },
+                        ] as { id: PlayerSideChoice; label: string }[]
+                      ).map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() =>
+                            onChangeMatchSettings({ ...matchSettings, playerSide: s.id })
+                          }
+                          className={`px-2 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
+                            matchSettings.playerSide === s.id
+                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                              : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-start="true"
+                    data-testid="start-chess960-match"
+                    onClick={() =>
+                      onStartMatch({
+                        ...matchSettings,
+                        mode: variantOpponent,
+                        variant: 'chess960',
+                        chess960Id: chess960RandomMode ? null : chess960PreviewId,
+                        customFen: undefined,
+                      })
+                    }
+                    className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
+                  >
+                    <Swords className="w-4 h-4" />
                     <span>{t('startMatch')}</span>
                   </button>
                 </div>

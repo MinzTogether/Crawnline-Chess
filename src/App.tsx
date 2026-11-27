@@ -14,6 +14,7 @@ import {
   type MatchSettings,
   type MatchVariant,
   type MoveRecord,
+  type RandomChessStyle,
 } from './types/chess';
 import {
   loadPreferences,
@@ -35,7 +36,13 @@ import {
 } from './engine/evalStabilizer';
 import { calculateAverageAccuracy, classifyMove } from './engine/uciParser';
 import { buildPgn, evaluateGameTermination, getMaterialSummary, parsePgnOrFen } from './game/chessLogic';
-import { generateRandomChessFen } from './game/customPosition';
+import { generateRandomChessFen, generateStandardRandomFen } from './game/customPosition';
+import {
+  applyChess960Move,
+  createChess960Position,
+  toShredderFen,
+  type Chess960CastlingRights,
+} from './game/chess960';
 import { detectOpening } from './game/openings';
 import { playChessSound } from './utils/sound';
 import { resolveAnimationTokens } from './utils/animationConfig';
@@ -115,6 +122,10 @@ export default function App() {
   const [orientation, setOrientation] = useState<Color>('w');
   const [activeMode, setActiveMode] = useState<GameMode>('stockfish');
   const [activeVariant, setActiveVariant] = useState<MatchVariant>('standard');
+  const [activeRandomStyle, setActiveRandomStyle] = useState<RandomChessStyle>('all');
+  const [activeChess960Id, setActiveChess960Id] = useState<number | null>(null);
+  const [initialChess960Rights, setInitialChess960Rights] = useState<Chess960CastlingRights | null>(null);
+  const [initialEngineFen, setInitialEngineFen] = useState<string>(INITIAL_FEN);
   const [positionLabel, setPositionLabel] = useState<string | null>(null);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
 
@@ -226,6 +237,31 @@ export default function App() {
   const viewedFen = viewPly === 0 ? initialFen : moves[viewPly - 1]?.fenAfter ?? latestFen;
   const isViewingLatest = viewPly === moves.length;
 
+  const isChess960 = activeVariant === 'chess960' && initialChess960Rights !== null;
+  const viewedChess960Rights = useMemo<Chess960CastlingRights | null>(() => {
+    if (!isChess960 || !initialChess960Rights) return null;
+    if (viewPly === 0) return initialChess960Rights;
+    return moves[viewPly - 1]?.castlingRights960 ?? initialChess960Rights;
+  }, [isChess960, initialChess960Rights, viewPly, moves]);
+
+  const latestChess960Rights = useMemo<Chess960CastlingRights | null>(() => {
+    if (!isChess960 || !initialChess960Rights) return null;
+    if (moves.length === 0) return initialChess960Rights;
+    return moves[moves.length - 1]?.castlingRights960 ?? initialChess960Rights;
+  }, [isChess960, initialChess960Rights, moves]);
+
+  const viewedEngineFen = useMemo(() => {
+    if (!isChess960 || !viewedChess960Rights) return viewedFen;
+    if (viewPly === 0) return initialEngineFen;
+    return moves[viewPly - 1]?.engineFenAfter ?? toShredderFen(viewedFen, viewedChess960Rights);
+  }, [isChess960, viewedChess960Rights, viewedFen, viewPly, initialEngineFen, moves]);
+
+  const latestEngineFen = useMemo(() => {
+    if (!isChess960 || !latestChess960Rights) return latestFen;
+    if (moves.length === 0) return initialEngineFen;
+    return moves[moves.length - 1]?.engineFenAfter ?? toShredderFen(latestFen, latestChess960Rights);
+  }, [isChess960, latestChess960Rights, latestFen, moves, initialEngineFen]);
+
   const viewedChess = useMemo(() => new Chess(viewedFen), [viewedFen]);
   const latestChess = useMemo(() => new Chess(latestFen), [latestFen]);
 
@@ -241,11 +277,15 @@ export default function App() {
   );
 
   const opening = useMemo(() => {
+    if (activeVariant !== 'standard') return null;
     const sanList = moves.slice(0, viewPly).map((m) => m.san);
     return detectOpening(sanList);
-  }, [moves, viewPly]);
+  }, [moves, viewPly, activeVariant]);
 
-  const fullGameOpening = useMemo(() => detectOpening(moves.map((m) => m.san)), [moves]);
+  const fullGameOpening = useMemo(
+    () => (activeVariant === 'standard' ? detectOpening(moves.map((m) => m.san)) : null),
+    [moves, activeVariant]
+  );
 
   const material = useMemo(() => getMaterialSummary(viewedFen), [viewedFen]);
 
@@ -315,8 +355,10 @@ export default function App() {
         whiteName,
         blackName,
         result: termination.resultString,
+        variant: isChess960 ? 'Chess960' : undefined,
+        pgnInitialFen: isChess960 ? initialEngineFen : initialFen,
       }),
-    [initialFen, moves, whiteName, blackName, termination.resultString]
+    [initialFen, initialEngineFen, isChess960, moves, whiteName, blackName, termination.resultString]
   );
 
   // Start / Restart a match
@@ -332,17 +374,37 @@ export default function App() {
       const newMatchId = `match-${Date.now()}`;
 
       let resolvedFen = INITIAL_FEN;
+      let resolvedEngineFen = INITIAL_FEN;
       let resolvedLabel: string | null = null;
+      let resolvedRandomStyle: RandomChessStyle = cfg.randomStyle ?? 'all';
+      let resolved960Id: number | null = null;
+      let resolved960Rights: Chess960CastlingRights | null = null;
+
       if (variant === 'random') {
-        resolvedFen = generateRandomChessFen();
-        resolvedLabel = translate(preferences.language, 'modeRandomTitle');
+        resolvedFen =
+          resolvedRandomStyle === 'standard' ? generateStandardRandomFen() : generateRandomChessFen();
+        resolvedEngineFen = resolvedFen;
+        const styleName =
+          resolvedRandomStyle === 'standard'
+            ? translate(preferences.language, 'randomStyleStandardTitle')
+            : translate(preferences.language, 'randomStyleAllTitle');
+        resolvedLabel = `${translate(preferences.language, 'modeRandomTitle')} · ${styleName}`;
+      } else if (variant === 'chess960') {
+        const pos960 = createChess960Position(cfg.chess960Id ?? undefined);
+        resolvedFen = pos960.fen;
+        resolvedEngineFen = pos960.shredderFen;
+        resolved960Id = pos960.id;
+        resolved960Rights = pos960.castlingRights;
+        resolvedLabel = `Chess960 #${pos960.id}`;
       } else if (variant === 'custom' && cfg.customFen) {
         try {
           const check = new Chess(cfg.customFen);
           resolvedFen = check.fen();
+          resolvedEngineFen = resolvedFen;
           resolvedLabel = translate(preferences.language, 'modeCustomTitle');
         } catch {
           resolvedFen = INITIAL_FEN;
+          resolvedEngineFen = INITIAL_FEN;
         }
       }
 
@@ -351,6 +413,10 @@ export default function App() {
 
       setActiveMode(cfg.mode);
       setActiveVariant(variant);
+      setActiveRandomStyle(resolvedRandomStyle);
+      setActiveChess960Id(resolved960Id);
+      setInitialChess960Rights(resolved960Rights);
+      setInitialEngineFen(resolvedEngineFen);
       setHumanColor(chosenSide);
       setOrientation(chosenSide);
       setInitialFen(resolvedFen);
@@ -404,42 +470,98 @@ export default function App() {
 
       const baseMoves = isViewingLatest ? moves : moves.slice(0, viewPly);
       const baseFen = baseMoves.length > 0 ? baseMoves[baseMoves.length - 1].fenAfter : initialFen;
-
-      const game = new Chess(baseFen);
-      let played;
-      try {
-        played = game.move({ from, to, promotion: promotion ?? 'q' });
-      } catch {
-        playChessSound('illegal', preferences.muted);
-        return false;
-      }
-      if (!played) {
-        playChessSound('illegal', preferences.muted);
-        return false;
-      }
-
-      const fenAfter = game.fen();
       const moveNum = parseInt(baseFen.split(' ')[5] || '1', 10) || Math.floor(baseMoves.length / 2) + 1;
 
       const prevAnalysis = latestAnalysisRef.current;
       const bestBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.bestMoveUci ?? undefined : undefined;
       const evalBefore = prevAnalysis && prevAnalysis.fen === baseFen ? prevAnalysis.lines[0]?.score : undefined;
 
-      const newRecord: MoveRecord = {
-        ply: baseMoves.length + 1,
-        moveNumber: moveNum,
-        color: played.color,
-        san: played.san,
-        uci: `${played.from}${played.to}${played.promotion ?? ''}`,
-        from: played.from,
-        to: played.to,
-        piece: played.piece,
-        captured: played.captured,
-        promotion: played.promotion,
-        fenBefore: baseFen,
-        fenAfter,
-        bestMoveBefore: bestBefore,
-      };
+      let newRecord: MoveRecord;
+      let movedColor: Color;
+      let soundKind: 'gameover' | 'check' | 'promote' | 'castle' | 'capture' | 'move';
+
+      if (isChess960 && initialChess960Rights) {
+        const baseRights =
+          baseMoves.length > 0
+            ? baseMoves[baseMoves.length - 1].castlingRights960 ?? initialChess960Rights
+            : initialChess960Rights;
+        const res = applyChess960Move(baseFen, baseRights, from, to, promotion);
+        if (!res) {
+          playChessSound('illegal', preferences.muted);
+          return false;
+        }
+        movedColor = res.color;
+        newRecord = {
+          ply: baseMoves.length + 1,
+          moveNumber: moveNum,
+          color: res.color,
+          san: res.san,
+          uci: res.uci,
+          from: res.from,
+          to: res.to,
+          piece: res.piece,
+          captured: res.captured,
+          promotion: res.promotion,
+          fenBefore: baseFen,
+          fenAfter: res.fenAfter,
+          engineFenAfter: res.shredderFenAfter,
+          castlingRights960: res.castlingRightsAfter,
+          bestMoveBefore: bestBefore,
+        };
+        soundKind =
+          res.isCheckmate || res.isDraw
+            ? 'gameover'
+            : res.isCheck
+              ? 'check'
+              : res.isPromotion
+                ? 'promote'
+                : res.isCastle
+                  ? 'castle'
+                  : res.isCapture
+                    ? 'capture'
+                    : 'move';
+      } else {
+        const game = new Chess(baseFen);
+        let played;
+        try {
+          played = game.move({ from, to, promotion: promotion ?? 'q' });
+        } catch {
+          playChessSound('illegal', preferences.muted);
+          return false;
+        }
+        if (!played) {
+          playChessSound('illegal', preferences.muted);
+          return false;
+        }
+        movedColor = played.color;
+        newRecord = {
+          ply: baseMoves.length + 1,
+          moveNumber: moveNum,
+          color: played.color,
+          san: played.san,
+          uci: `${played.from}${played.to}${played.promotion ?? ''}`,
+          from: played.from,
+          to: played.to,
+          piece: played.piece,
+          captured: played.captured,
+          promotion: played.promotion,
+          fenBefore: baseFen,
+          fenAfter: game.fen(),
+          bestMoveBefore: bestBefore,
+        };
+        soundKind =
+          game.isCheckmate() || game.isDraw()
+            ? 'gameover'
+            : game.inCheck()
+              ? 'check'
+              : played.flags.includes('p')
+                ? 'promote'
+                : played.flags.includes('k') || played.flags.includes('q')
+                  ? 'castle'
+                  : played.captured || played.flags.includes('e')
+                    ? 'capture'
+                    : 'move';
+      }
 
       const nextMoves = [...baseMoves, newRecord];
       if (evalBefore && nextMoves.length >= 2 && !nextMoves[nextMoves.length - 2].evalAfter) {
@@ -454,32 +576,21 @@ export default function App() {
       setHintArrow(null);
 
       if (incrementSec > 0 && activeMode !== 'analysis') {
-        if (played.color === 'w') {
+        if (movedColor === 'w') {
           setWhiteClock((c) => (c !== null ? c + incrementSec : null));
         } else {
           setBlackClock((c) => (c !== null ? c + incrementSec : null));
         }
       }
 
-      if (game.isCheckmate() || game.isDraw()) {
-        playChessSound('gameover', preferences.muted);
-      } else if (game.inCheck()) {
-        playChessSound('check', preferences.muted);
-      } else if (played.flags.includes('p')) {
-        playChessSound('promote', preferences.muted);
-      } else if (played.flags.includes('k') || played.flags.includes('q')) {
-        playChessSound('castle', preferences.muted);
-      } else if (played.captured || played.flags.includes('e')) {
-        playChessSound('capture', preferences.muted);
-      } else {
-        playChessSound('move', preferences.muted);
-      }
-
+      playChessSound(soundKind, preferences.muted);
       return true;
     },
     [
       appState,
       activeMode,
+      isChess960,
+      initialChess960Rights,
       termination.isOver,
       isViewingLatest,
       moves,
@@ -508,7 +619,9 @@ export default function App() {
           blackName,
           result: termination.resultString,
           reason: termination.reason,
-          openingName: fullGameOpening ? `${fullGameOpening.eco} · ${fullGameOpening.name}` : 'Standard Game',
+          openingName: fullGameOpening
+            ? `${fullGameOpening.eco} · ${fullGameOpening.name}`
+            : positionLabel ?? 'Standard Game',
           movesCount: Math.ceil(moves.length / 2),
           pgn: pgnText,
           whiteAccuracy: report.white.accuracy,
@@ -529,6 +642,7 @@ export default function App() {
     whiteName,
     blackName,
     fullGameOpening,
+    positionLabel,
     pgnText,
     humanColor,
   ]);
@@ -574,7 +688,13 @@ export default function App() {
     analyzer
       .analyzePosition(
         viewedFen,
-        { depth: preferences.analysisDepth, multiPv: preferences.multiPv },
+        {
+          depth: preferences.analysisDepth,
+          multiPv: preferences.multiPv,
+          chess960: isChess960,
+          engineFen: viewedEngineFen,
+          chess960Rights: viewedChess960Rights ?? undefined,
+        },
         (snapshot) => {
           if (cancelled) return;
           setEngineAnalysis(snapshot);
@@ -587,7 +707,10 @@ export default function App() {
               const target = prev[idx];
               const prevEval: EvalScore =
                 idx > 0 && prev[idx - 1].evalAfter ? prev[idx - 1].evalAfter! : { type: 'cp', value: 20 };
-              const isBook = idx < 6 && Boolean(detectOpening(prev.slice(0, idx + 1).map((x) => x.san)));
+              const isBook =
+                activeVariant === 'standard' &&
+                idx < 6 &&
+                Boolean(detectOpening(prev.slice(0, idx + 1).map((x) => x.san)));
               const classified = classifyMove({
                 evalBefore: prevEval,
                 evalAfter: score,
@@ -619,7 +742,11 @@ export default function App() {
     engineEnabled,
     isReviewing,
     viewedFen,
+    viewedEngineFen,
     viewedChess,
+    isChess960,
+    viewedChess960Rights,
+    activeVariant,
     preferences.analysisDepth,
     preferences.multiPv,
     ensureAnalyzer,
@@ -641,7 +768,7 @@ export default function App() {
     const startedAt = performance.now();
 
     opponent
-      .computeMove(latestFen, activeLevel)
+      .computeMove(latestEngineFen, activeLevel, isChess960)
       .then((uciMove) => {
         if (cancelled || !uciMove || uciMove.length < 4) return;
         const elapsed = performance.now() - startedAt;
@@ -672,7 +799,8 @@ export default function App() {
     isViewingLatest,
     humanColor,
     latestChess,
-    latestFen,
+    latestEngineFen,
+    isChess960,
     activeLevel,
     ensureOpponent,
     applyMove,
@@ -735,12 +863,23 @@ export default function App() {
       const reviewed: MoveRecord[] = [...targetMoves];
 
       try {
-        let prevResult = await analyzer.evaluateOnce(targetInitialFen, 10);
+        let prevResult = await analyzer.evaluateOnce(targetInitialFen, 10, {
+          chess960: isChess960,
+          engineFen: isChess960 ? initialEngineFen : targetInitialFen,
+          chess960Rights: initialChess960Rights ?? undefined,
+        });
 
         for (let i = 0; i < reviewed.length; i++) {
           const m = reviewed[i];
-          const afterResult = await analyzer.evaluateOnce(m.fenAfter, 10);
-          const isBook = i < 6 && Boolean(detectOpening(reviewed.slice(0, i + 1).map((x) => x.san)));
+          const afterResult = await analyzer.evaluateOnce(m.fenAfter, 10, {
+            chess960: isChess960,
+            engineFen: isChess960 ? m.engineFenAfter ?? m.fenAfter : m.fenAfter,
+            chess960Rights: m.castlingRights960,
+          });
+          const isBook =
+            activeVariant === 'standard' &&
+            i < 6 &&
+            Boolean(detectOpening(reviewed.slice(0, i + 1).map((x) => x.san)));
 
           const classified = classifyMove({
             evalBefore: prevResult.score,
@@ -791,7 +930,7 @@ export default function App() {
         setIsReviewing(false);
       }
     },
-    [ensureAnalyzer]
+    [ensureAnalyzer, isChess960, initialEngineFen, initialChess960Rights, activeVariant]
   );
 
   const handleRunGameReview = useCallback(() => {
@@ -841,6 +980,9 @@ export default function App() {
       setIsBotThinking(false);
       setActiveMode('analysis');
       setActiveVariant('standard');
+      setActiveChess960Id(null);
+      setInitialChess960Rights(null);
+      setInitialEngineFen(parsed.initialFen);
       setInitialFen(parsed.initialFen);
       setPositionLabel(label ?? (parsed.initialFen !== INITIAL_FEN ? 'Custom FEN Position' : 'Imported Match'));
       setActiveMatchId(null);
@@ -1069,13 +1211,19 @@ export default function App() {
             <span className="text-sm sm:text-base font-extrabold tracking-tight text-[var(--app-text)] whitespace-nowrap">
               Crownline Chess
             </span>
-            <span className="hidden sm:inline text-xs text-[var(--app-text-muted)] whitespace-nowrap truncate">
+            <span className="hidden sm:inline text-xs text-[var(--app-text-muted)] whitespace-nowrap truncate" data-testid="arena-mode-label">
               ·{' '}
               {activeVariant === 'custom'
                 ? `${translate(preferences.language, 'modeCustomTitle')} · `
                 : activeVariant === 'random'
-                  ? `${translate(preferences.language, 'modeRandomTitle')} · `
-                  : ''}
+                  ? `${
+                      activeRandomStyle === 'standard'
+                        ? translate(preferences.language, 'randomStyleStandardTitle')
+                        : translate(preferences.language, 'randomStyleAllTitle')
+                    } · `
+                  : activeVariant === 'chess960'
+                    ? `Chess960${activeChess960Id !== null ? ` #${activeChess960Id}` : ''} · `
+                    : ''}
               {activeMode === 'stockfish'
                 ? `${translate(preferences.language, 'arenaVsStockfish')} ${activeLevel.elo}`
                 : activeMode === 'local'
@@ -1100,7 +1248,7 @@ export default function App() {
               <Home className="w-3.5 h-3.5" />
             </button>
 
-            {activeVariant === 'random' && activeMode !== 'analysis' && (
+            {(activeVariant === 'random' || activeVariant === 'chess960') && activeMode !== 'analysis' && (
               <button
                 type="button"
                 tabIndex={-1}
@@ -1109,7 +1257,23 @@ export default function App() {
                 title={translate(preferences.language, 'arenaReshuffleBtn')}
                 onClick={(e) => {
                   e.currentTarget.blur();
-                  startMatch({ ...matchSettings, mode: activeMode, variant: 'random', customFen: undefined });
+                  if (activeVariant === 'chess960') {
+                    startMatch({
+                      ...matchSettings,
+                      mode: activeMode,
+                      variant: 'chess960',
+                      chess960Id: null,
+                      customFen: undefined,
+                    });
+                  } else {
+                    startMatch({
+                      ...matchSettings,
+                      mode: activeMode,
+                      variant: 'random',
+                      randomStyle: activeRandomStyle,
+                      customFen: undefined,
+                    });
+                  }
                 }}
                 className="arena-topbar-btn h-8 px-2.5 rounded-md bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-semibold text-[var(--app-text)] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap anim-interactive"
               >
@@ -1254,6 +1418,7 @@ export default function App() {
             evalScore={activeEvalScore}
             evalDepth={stabilizedEval.depth}
             evalStabilizing={stabilizedEval.isStabilizing}
+            chess960Rights={viewedChess960Rights}
             onMove={applyMove}
           />
 
@@ -1312,13 +1477,13 @@ export default function App() {
           )}
         </section>
 
-        <RightPanel
+          <RightPanel
           activeTab={rightTab}
           onTabChange={setRightTab}
           mode={activeMode}
           moves={moves}
           viewPly={viewPly}
-          currentFen={viewedFen}
+          currentFen={viewedEngineFen}
           opening={opening}
           positionLabel={positionLabel}
           whiteName={whiteName}
@@ -1411,7 +1576,12 @@ export default function App() {
           <NewMatchModal
             settings={matchSettings}
             onChangeSettings={setMatchSettings}
-            onConfirm={() => startMatch()}
+            onConfirm={() =>
+              startMatch({
+                ...matchSettings,
+                chess960Id: matchSettings.variant === 'chess960' ? null : matchSettings.chess960Id,
+              })
+            }
             onCancel={() => setShowNewMatchModal(false)}
           />
         )}
