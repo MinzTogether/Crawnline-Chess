@@ -271,7 +271,9 @@ export default function App() {
         : `Stockfish (${activeLevel.name})`
       : activeMode === 'analysis'
         ? 'White'
-        : `${playerDisplayName} (W)`;
+        : humanColor === 'w'
+          ? `${playerDisplayName} (W)`
+          : 'Player 2 (W)';
 
   const blackName =
     activeMode === 'stockfish'
@@ -280,7 +282,9 @@ export default function App() {
         : `Stockfish (${activeLevel.name})`
       : activeMode === 'analysis'
         ? 'Black'
-        : 'Player 2 (B)';
+        : humanColor === 'b'
+          ? `${playerDisplayName} (B)`
+          : 'Player 2 (B)';
 
   const whiteSubtitle =
     activeMode === 'stockfish'
@@ -317,7 +321,7 @@ export default function App() {
     (customSettings?: MatchSettings) => {
       const cfg = customSettings ?? matchSettings;
       const tc = TIME_CONTROLS.find((t) => t.id === cfg.timeControlId) ?? TIME_CONTROLS[4];
-      const chosenSide = cfg.mode === 'stockfish' ? resolvePlayerColor(cfg.playerSide) : 'w';
+      const chosenSide = cfg.mode === 'analysis' ? 'w' : resolvePlayerColor(cfg.playerSide);
       const newMatchId = `match-${Date.now()}`;
 
       opponentRef.current?.cancel();
@@ -884,6 +888,10 @@ export default function App() {
           setShowNewMatchModal(false);
           return;
         }
+        if (e.key === 'Escape' && appState === 'gameover' && !gameOverDismissed) {
+          setGameOverDismissed(true);
+          return;
+        }
         if (appState === 'playing') setAppState('paused');
         else if (appState === 'paused') setAppState('playing');
         return;
@@ -913,7 +921,15 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [appState, moves.length, showNewMatchModal, handleRequestHint, updatePreferences, preferences.muted]);
+  }, [
+    appState,
+    gameOverDismissed,
+    moves.length,
+    showNewMatchModal,
+    handleRequestHint,
+    updatePreferences,
+    preferences.muted,
+  ]);
 
   // Compute live Stockfish arrows for the board
   const engineArrows = useMemo<BoardArrow[]>(() => {
@@ -1151,7 +1167,7 @@ export default function App() {
             subtitle={topColor === 'w' ? whiteSubtitle : blackSubtitle}
             color={topColor}
             avatarImage={
-              (activeMode === 'stockfish' && topColor === humanColor) || (activeMode === 'local' && topColor === 'w')
+              (activeMode === 'stockfish' || activeMode === 'local') && topColor === humanColor
                 ? profile.avatarImage
                 : null
             }
@@ -1194,8 +1210,7 @@ export default function App() {
             subtitle={bottomColor === 'w' ? whiteSubtitle : blackSubtitle}
             color={bottomColor}
             avatarImage={
-              (activeMode === 'stockfish' && bottomColor === humanColor) ||
-              (activeMode === 'local' && bottomColor === 'w')
+              (activeMode === 'stockfish' || activeMode === 'local') && bottomColor === humanColor
                 ? profile.avatarImage
                 : null
             }
@@ -1206,6 +1221,27 @@ export default function App() {
             clockSeconds={bottomColor === 'w' ? whiteClock : blackClock}
             accuracy={bottomColor === 'w' ? whiteAccuracy : blackAccuracy}
           />
+
+          {appState === 'gameover' && gameOverDismissed && (
+            <div className="mt-1.5 px-3 py-2 rounded-lg bg-[var(--app-surface)] border border-[var(--app-border-strong)] flex items-center justify-between gap-3 text-xs">
+              <span className="font-bold text-[var(--app-text)] truncate">
+                {termination.winner === 'draw'
+                  ? translate(preferences.language, 'drawResult')
+                  : termination.winner === 'w'
+                    ? translate(preferences.language, 'whiteWins')
+                    : translate(preferences.language, 'blackWins')}{' '}
+                · <span className="font-normal text-[var(--app-text-muted)]">{termination.reason}</span>
+              </span>
+              <button
+                type="button"
+                data-testid="reopen-gameover-btn"
+                onClick={() => setGameOverDismissed(false)}
+                className="font-bold text-[var(--app-accent)] hover:underline whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                {translate(preferences.language, 'showResultBanner')}
+              </button>
+            </div>
+          )}
 
           {!isViewingLatest && activeMode !== 'analysis' && (
             <div className="mt-1 px-3 py-2 rounded-lg bg-[var(--app-surface)] border border-[#E6A832]/40 flex items-center justify-between text-xs">
@@ -1287,17 +1323,33 @@ export default function App() {
           termination={termination}
           whiteName={whiteName}
           blackName={blackName}
-          totalMoves={moves.length}
-          whiteAccuracy={whiteAccuracy}
-          blackAccuracy={blackAccuracy}
-          onRateMatch={() => {
+          whiteAvatarImage={
+            (activeMode === 'stockfish' || activeMode === 'local') && humanColor === 'w'
+              ? profile.avatarImage
+              : null
+          }
+          blackAvatarImage={
+            (activeMode === 'stockfish' || activeMode === 'local') && humanColor === 'b'
+              ? profile.avatarImage
+              : null
+          }
+          moves={moves}
+          finalFen={latestFen}
+          onAnalysis={() => {
             setGameOverDismissed(true);
             setActiveMode('analysis');
+            setAppState('playing');
             setShowBestArrow(true);
             setRightTab('rating');
-            handleRunGameReview();
+            if (moves.length > 0) {
+              handleRunGameReview();
+            }
           }}
-          onPlayAgain={() => startMatch()}
+          onNewMatch={() => {
+            setGameOverDismissed(true);
+            setShowNewMatchModal(true);
+          }}
+          onReturnHome={() => returnToHub('home')}
           onDismiss={() => setGameOverDismissed(true)}
         />
       )}

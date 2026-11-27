@@ -1,11 +1,13 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   Award,
   Camera,
-  Check,
   ChevronRight,
   Cpu,
+  Globe,
   Home,
+  Lock,
   Settings,
   Swords,
   Trash2,
@@ -30,6 +32,7 @@ import { AppLogoIcon } from './AppIcons';
 import { SettingsSection, type SettingsSubPage } from './SettingsSection';
 
 export type HubSection = 'home' | 'settings' | 'profile';
+type HomeStep = 'root' | 'stockfish-setup' | 'person-select' | 'person-offline-setup' | 'analysis-setup';
 
 const AVATAR_COLORS = ['#81B64C', '#5C9CE6', '#D99B3C', '#26C2A3', '#D96666', '#9C7EE6'];
 
@@ -115,6 +118,7 @@ export const MainHub: React.FC<MainHubProps> = ({
   const [profileSavedToast, setProfileSavedToast] = useState(false);
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
   const [settingsSubPage, setSettingsSubPage] = useState<SettingsSubPage>('root');
+  const [homeStep, setHomeStep] = useState<HomeStep>('root');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const safeDisplayName = profile.displayName.trim() || 'Player';
   const safeTitle = profile.title.trim() || 'Chess Player';
@@ -123,6 +127,8 @@ export const MainHub: React.FC<MainHubProps> = ({
   const handleSelectNavSection = (next: HubSection) => {
     if (next === 'settings') {
       setSettingsSubPage('root');
+    } else if (next === 'home') {
+      setHomeStep('root');
     }
     onChangeSection(next);
   };
@@ -377,11 +383,18 @@ export const MainHub: React.FC<MainHubProps> = ({
               </div>
             </div>
 
-            {/* Chess.com-style 2-Column Mode Launcher (NO Chessboard): Mode List Left + Setup Panel Right */}
-            <div className="hub-home-grid grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-start">
-              {/* Left Column: Chess.com-Style Stacked Mode Selection Cards + Recent Matches */}
-              <div className="hub-home-left lg:col-span-7 flex flex-col gap-5 lg:gap-6">
-                <section aria-label={t('selectMode')} className="flex flex-col gap-3">
+            {/* ================= HOME ROOT: SELECT MODE + HISTORY ONLY ================= */}
+            {homeStep === 'root' && (
+              <div
+                key="home-step-root"
+                className="hub-home-grid grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 items-start anim-view-enter"
+                data-testid="home-root-view"
+              >
+                {/* Left Column: Select Mode */}
+                <section
+                  aria-label={t('selectMode')}
+                  className="hub-home-left lg:col-span-7 flex flex-col gap-3"
+                >
                   <div className="flex items-center justify-between">
                     <h2 className="text-xs font-bold tracking-wide text-[var(--app-text-muted)]">
                       {t('selectMode')}
@@ -394,47 +407,57 @@ export const MainHub: React.FC<MainHubProps> = ({
                       [
                         {
                           id: 'stockfish' as GameMode,
+                          testId: 'mode-card-stockfish',
                           title: t('modeStockfishTitle'),
                           subtitle: t('modeStockfishDesc'),
                           meta: `${activeLevel.name} · ${activeLevel.elo} Elo`,
                           iconBg: 'rgba(129, 182, 76, 0.16)',
                           iconColor: '#81B64C',
                           icon: Cpu,
+                          onSelect: () => {
+                            onChangeMatchSettings({ ...matchSettings, mode: 'stockfish' });
+                            setHomeStep('stockfish-setup');
+                          },
                         },
                         {
                           id: 'local' as GameMode,
+                          testId: 'mode-card-person',
                           title: t('modeLocalTitle'),
                           subtitle: t('modeLocalDesc'),
                           meta: t('modeLocalMeta'),
                           iconBg: 'rgba(80, 137, 198, 0.16)',
                           iconColor: '#5089C6',
                           icon: Users,
+                          onSelect: () => {
+                            onChangeMatchSettings({ ...matchSettings, mode: 'local' });
+                            setHomeStep('person-select');
+                          },
                         },
                         {
                           id: 'analysis' as GameMode,
+                          testId: 'mode-card-analysis',
                           title: t('modeAnalysisTitle'),
                           subtitle: t('modeAnalysisDesc'),
                           meta: t('modeAnalysisMeta'),
                           iconBg: 'rgba(27, 173, 166, 0.16)',
                           iconColor: '#1BADA6',
                           icon: Award,
+                          onSelect: () => {
+                            onChangeMatchSettings({ ...matchSettings, mode: 'analysis' });
+                            setHomeStep('analysis-setup');
+                          },
                         },
                       ]
                     ).map((card, idx) => {
                       const Icon = card.icon;
-                      const active = matchSettings.mode === card.id;
                       return (
                         <button
                           key={card.id}
                           type="button"
-                          aria-pressed={active}
-                          onClick={() => onChangeMatchSettings({ ...matchSettings, mode: card.id })}
+                          data-testid={card.testId}
+                          onClick={card.onSelect}
                           style={{ '--stagger': idx } as React.CSSProperties}
-                          className={`w-full p-4 sm:p-5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-4 group anim-card-stagger anim-interactive ${
-                            active
-                              ? 'bg-[var(--app-surface)] border-[var(--app-accent)] shadow-sm'
-                              : 'bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-border-strong)] hover:bg-[var(--app-surface-hover)]'
-                          }`}
+                          className="w-full p-4 sm:p-5 rounded-xl border bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] text-left transition-all cursor-pointer flex items-center justify-between gap-4 group anim-card-stagger anim-interactive"
                         >
                           <div className="flex items-center gap-4 min-w-0">
                             <div
@@ -444,10 +467,8 @@ export const MainHub: React.FC<MainHubProps> = ({
                               <Icon className="w-6 h-6" style={{ color: card.iconColor }} />
                             </div>
                             <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-base sm:text-lg font-extrabold text-[var(--app-text)] leading-tight truncate">
-                                  {card.title}
-                                </span>
+                              <div className="text-base sm:text-lg font-extrabold text-[var(--app-text)] leading-tight truncate">
+                                {card.title}
                               </div>
                               <p className="text-xs sm:text-[13px] text-[var(--app-text-muted)] mt-1 leading-snug">
                                 {card.subtitle}
@@ -459,11 +480,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                           </div>
 
                           <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg">
-                            {active ? (
-                              <Check className="w-5 h-5 text-[var(--app-accent)]" />
-                            ) : (
-                              <ChevronRight className="w-5 h-5 text-[var(--app-text-subtle)] group-hover:text-[var(--app-text)] transition-colors" />
-                            )}
+                            <ChevronRight className="w-5 h-5 text-[var(--app-text-subtle)] group-hover:text-[var(--app-accent)] group-hover:translate-x-0.5 transition-all" />
                           </div>
                         </button>
                       );
@@ -471,10 +488,11 @@ export const MainHub: React.FC<MainHubProps> = ({
                   </div>
                 </section>
 
-                {/* Recent Matches Strip with One-Click "Rate Match" */}
+                {/* Right Column: Match History */}
                 <section
+                  aria-label={t('recentMatches')}
                   style={{ '--stagger': 3 } as React.CSSProperties}
-                  className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-3 anim-card-stagger"
+                  className="hub-home-right lg:col-span-5 bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 flex flex-col gap-3 anim-card-stagger"
                 >
                   <div className="flex items-center justify-between">
                     <h2 className="text-sm font-bold text-[var(--app-text)]">{t('recentMatches')}</h2>
@@ -487,7 +505,7 @@ export const MainHub: React.FC<MainHubProps> = ({
                     </button>
                   </div>
                   <div className="flex flex-col divide-y divide-[var(--app-border)]">
-                    {savedMatches.slice(0, 3).map((m) => (
+                    {savedMatches.slice(0, 5).map((m) => (
                       <div key={m.id} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-xs sm:text-sm font-bold text-[var(--app-text)] truncate">
@@ -517,183 +535,430 @@ export const MainHub: React.FC<MainHubProps> = ({
                   </div>
                 </section>
               </div>
+            )}
 
-              {/* Right Column: Sticky Chess.com-Style Match Setup & Launch Panel */}
-              <div className="hub-home-right lg:col-span-5 lg:sticky lg:top-6">
-                <div
-                  key={`setup-${matchSettings.mode}`}
-                  className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm anim-view-enter"
-                >
-                  {/* Panel Header */}
-                  <div className="pb-4 border-b border-[var(--app-border)]">
-                    <div className="text-xs font-semibold text-[var(--app-accent)]">
-                      {matchSettings.mode === 'stockfish'
-                        ? t('setupEngineLabel')
-                        : matchSettings.mode === 'local'
-                          ? t('setupLocalLabel')
-                          : t('setupReviewLabel')}
+            {/* ================= STEP: CHALLENGE STOCKFISH BOT -> ENGINE MATCH SETUP ================= */}
+            {homeStep === 'stockfish-setup' && (
+              <div
+                key="home-step-stockfish"
+                className="max-w-[680px] w-full mx-auto flex flex-col gap-4 anim-view-enter"
+                data-testid="stockfish-setup-view"
+              >
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setHomeStep('root')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer anim-interactive"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>{t('backToModes')}</span>
+                  </button>
+                </div>
+
+                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm">
+                  <div className="pb-4 border-b border-[var(--app-border)] flex items-center gap-3.5">
+                    <div
+                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
+                      style={{ backgroundColor: 'rgba(129, 182, 76, 0.16)' }}
+                    >
+                      <Cpu className="w-5 h-5 text-[#81B64C]" />
                     </div>
-                    <h2 className="text-lg font-extrabold text-[var(--app-text)] mt-0.5">
-                      {matchSettings.mode === 'stockfish'
-                        ? t('modeStockfishTitle')
-                        : matchSettings.mode === 'local'
-                          ? t('modeLocalTitle')
-                          : t('modeAnalysisTitle')}
-                    </h2>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[var(--app-accent)]">{t('setupEngineLabel')}</div>
+                      <h2 className="text-lg sm:text-xl font-extrabold text-[var(--app-text)] mt-0.5 truncate">
+                        {t('modeStockfishTitle')}
+                      </h2>
+                    </div>
                   </div>
 
-                  {matchSettings.mode === 'analysis' ? (
-                    <>
-                      <p className="text-xs text-[var(--app-text-muted)] leading-relaxed -mt-1">
-                        {t('analysisIntro')}
-                      </p>
-
-                      <form onSubmit={handleQuickRateSubmit} className="flex flex-col gap-3">
-                        <label htmlFor="hub-pgn-rate" className="text-xs font-semibold text-[var(--app-text-muted)]">
-                          {t('pgnToRateOptional')}
-                        </label>
-                        <textarea
-                          id="hub-pgn-rate"
-                          rows={4}
-                          value={pgnQuickInput}
-                          onChange={(e) => {
-                            setPgnQuickInput(e.target.value);
-                            if (pgnQuickError) setPgnQuickError(null);
-                          }}
-                          placeholder="1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5..."
-                          className="w-full rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:outline-none p-3 text-xs font-mono text-[var(--app-text)] resize-none"
-                        />
-                        {pgnQuickError && <p className="text-xs text-[#E04F4F]">{pgnQuickError}</p>}
-
-                        <div className="flex flex-col gap-2.5 pt-1">
+                  {/* Stockfish Engine Strength */}
+                  <div data-testid="stockfish-strength-section">
+                    <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
+                      <span className="text-xs font-semibold text-[var(--app-text-muted)]">
+                        {t('stockfishStrength')}
+                      </span>
+                      <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)] whitespace-nowrap">
+                        {activeLevel.name} · {activeLevel.elo}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {STOCKFISH_LEVELS.map((lvl) => {
+                        const selected = lvl.id === matchSettings.stockfishLevelId;
+                        return (
                           <button
-                            type="submit"
-                            className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-sm transition-colors shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer whitespace-nowrap anim-interactive"
-                          >
-                            {t('ratePgnMatch')}
-                          </button>
-                          <button
+                            key={lvl.id}
                             type="button"
-                            data-start="true"
-                            onClick={() => onOpenMatchRating()}
-                            className="w-full py-3 px-4 rounded-xl bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-bold text-sm transition-colors cursor-pointer whitespace-nowrap anim-interactive"
+                            onClick={() =>
+                              onChangeMatchSettings({
+                                ...matchSettings,
+                                mode: 'stockfish',
+                                stockfishLevelId: lvl.id,
+                              })
+                            }
+                            className={`py-2.5 px-2.5 rounded-lg text-left border transition-colors cursor-pointer anim-interactive ${
+                              selected
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                            }`}
                           >
-                            {t('openAnalysisBoard')}
+                            <div className="text-xs font-mono font-bold tabular-nums">{lvl.elo}</div>
+                            <div className="text-[11px] truncate opacity-85">{lvl.name}</div>
                           </button>
-                        </div>
-                      </form>
-                    </>
-                  ) : (
-                    <>
-                      {/* Stockfish Strength Picker */}
-                      {matchSettings.mode === 'stockfish' && (
-                        <div>
-                          <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
-                            <span className="text-xs font-semibold text-[var(--app-text-muted)]">
-                              {t('stockfishStrength')}
-                            </span>
-                            <span className="text-xs font-mono tabular-nums font-bold text-[var(--app-accent)] whitespace-nowrap">
-                              {activeLevel.name} · {activeLevel.elo}
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            {STOCKFISH_LEVELS.map((lvl) => {
-                              const selected = lvl.id === matchSettings.stockfishLevelId;
-                              return (
-                                <button
-                                  key={lvl.id}
-                                  type="button"
-                                  onClick={() =>
-                                    onChangeMatchSettings({ ...matchSettings, stockfishLevelId: lvl.id })
-                                  }
-                                  className={`py-2.5 px-2.5 rounded-lg text-left border transition-colors cursor-pointer anim-interactive ${
-                                    selected
-                                      ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
-                                      : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
-                                  }`}
-                                >
-                                  <div className="text-xs font-mono font-bold tabular-nums">{lvl.elo}</div>
-                                  <div className="text-[11px] truncate opacity-85">{lvl.name}</div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
+                        );
+                      })}
+                    </div>
+                  </div>
 
-                      {/* Time Control */}
+                  {/* Time Control */}
+                  <div>
+                    <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                      {t('timeControl')}
+                    </span>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {TIME_CONTROLS.map((tc) => {
+                        const selected = tc.id === matchSettings.timeControlId;
+                        return (
+                          <button
+                            key={tc.id}
+                            type="button"
+                            onClick={() =>
+                              onChangeMatchSettings({ ...matchSettings, mode: 'stockfish', timeControlId: tc.id })
+                            }
+                            className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap truncate cursor-pointer anim-interactive ${
+                              tc.id === 'unlimited' ? 'col-span-2' : ''
+                            } ${
+                              selected
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                            }`}
+                          >
+                            {tc.id === 'unlimited' ? t('unlimited') : tc.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Play As */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-[var(--app-text-muted)]">{t('playAs')}</span>
+                    <div className="grid grid-cols-3 gap-1.5 flex-1 min-w-[190px] max-w-[280px]">
+                      {(
+                        [
+                          { id: 'w', label: t('white') },
+                          { id: 'random', label: t('random') },
+                          { id: 'b', label: t('black') },
+                        ] as { id: PlayerSideChoice; label: string }[]
+                      ).map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() =>
+                            onChangeMatchSettings({ ...matchSettings, mode: 'stockfish', playerSide: s.id })
+                          }
+                          className={`px-2 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
+                            matchSettings.playerSide === s.id
+                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                              : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-start="true"
+                    data-testid="start-stockfish-match"
+                    onClick={() => onStartMatch({ ...matchSettings, mode: 'stockfish' })}
+                    className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
+                  >
+                    <Swords className="w-4 h-4" />
+                    <span>{t('startMatch')}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ================= STEP: PLAY WITH PERSON -> OFFLINE vs ONLINE (LOCKED) ================= */}
+            {homeStep === 'person-select' && (
+              <div
+                key="home-step-person-select"
+                className="max-w-[760px] w-full mx-auto flex flex-col gap-5 anim-view-enter"
+                data-testid="person-mode-select-view"
+              >
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setHomeStep('root')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer anim-interactive"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>{t('backToModes')}</span>
+                  </button>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold text-[var(--app-accent)]">{t('modeLocalTitle')}</div>
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-[var(--app-text)] mt-0.5">
+                    {t('personModeHeading')}
+                  </h2>
+                  <p className="text-sm text-[var(--app-text-muted)] mt-1">{t('personModeSubtitle')}</p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Offline Mode (Unlocked) */}
+                  <button
+                    type="button"
+                    data-testid="person-mode-offline"
+                    onClick={() => {
+                      onChangeMatchSettings({ ...matchSettings, mode: 'local' });
+                      setHomeStep('person-offline-setup');
+                    }}
+                    className="p-5 sm:p-6 rounded-xl border bg-[var(--app-surface)] border-[var(--app-border)] hover:border-[var(--app-accent)] hover:bg-[var(--app-surface-hover)] text-left transition-all cursor-pointer flex flex-col justify-between gap-5 group anim-interactive"
+                  >
+                    <div className="flex flex-col gap-3.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div
+                          className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
+                          style={{ backgroundColor: 'rgba(80, 137, 198, 0.16)' }}
+                        >
+                          <Users className="w-6 h-6 text-[#5089C6]" />
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-[var(--app-text-subtle)] group-hover:text-[var(--app-accent)] group-hover:translate-x-0.5 transition-all" />
+                      </div>
                       <div>
-                        <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
-                          {t('timeControl')}
-                        </span>
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {TIME_CONTROLS.map((tc) => {
-                            const selected = tc.id === matchSettings.timeControlId;
-                            return (
-                              <button
-                                key={tc.id}
-                                type="button"
-                                onClick={() => onChangeMatchSettings({ ...matchSettings, timeControlId: tc.id })}
-                                className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap truncate cursor-pointer anim-interactive ${
-                                  tc.id === 'unlimited' ? 'col-span-2' : ''
-                                } ${
-                                  selected
-                                    ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
-                                    : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
-                                }`}
-                              >
-                                {tc.id === 'unlimited' ? t('unlimited') : tc.label}
-                              </button>
-                            );
-                          })}
+                        <div className="text-lg font-extrabold text-[var(--app-text)]">
+                          {t('personOfflineTitle')}
+                        </div>
+                        <p className="text-xs sm:text-[13px] text-[var(--app-text-muted)] mt-1.5 leading-relaxed">
+                          {t('personOfflineDesc')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-mono tabular-nums text-[var(--app-accent)] font-semibold">
+                      {t('personOfflineMeta')}
+                    </div>
+                  </button>
+
+                  {/* Online Mode (Locked) */}
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    data-testid="person-mode-online"
+                    className="p-5 sm:p-6 rounded-xl border bg-[var(--app-surface)]/70 border-[var(--app-border)] text-left flex flex-col justify-between gap-5 opacity-60 cursor-not-allowed select-none"
+                  >
+                    <div className="flex flex-col gap-3.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-[var(--app-surface-2)] border border-[var(--app-border)]">
+                          <Globe className="w-6 h-6 text-[var(--app-text-subtle)]" />
+                        </div>
+                        <div className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--app-text-muted)]">
+                          <Lock className="w-4 h-4" />
+                          <span>{t('modeLockedLabel')}</span>
                         </div>
                       </div>
-
-                      {/* Side Selection */}
-                      {matchSettings.mode === 'stockfish' && (
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-xs font-semibold text-[var(--app-text-muted)]">{t('playAs')}</span>
-                          <div className="grid grid-cols-3 gap-1.5 flex-1 min-w-[190px] max-w-[260px]">
-                            {(
-                              [
-                                { id: 'w', label: t('white') },
-                                { id: 'random', label: t('random') },
-                                { id: 'b', label: t('black') },
-                              ] as { id: PlayerSideChoice; label: string }[]
-                            ).map((s) => (
-                              <button
-                                key={s.id}
-                                type="button"
-                                onClick={() => onChangeMatchSettings({ ...matchSettings, playerSide: s.id })}
-                                className={`px-2 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
-                                  matchSettings.playerSide === s.id
-                                    ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
-                                    : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
-                                }`}
-                              >
-                                {s.label}
-                              </button>
-                            ))}
-                          </div>
+                      <div>
+                        <div className="text-lg font-extrabold text-[var(--app-text)]">
+                          {t('personOnlineTitle')}
                         </div>
-                      )}
+                        <p className="text-xs sm:text-[13px] text-[var(--app-text-muted)] mt-1.5 leading-relaxed">
+                          {t('personOnlineDesc')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-mono text-[var(--app-text-subtle)] flex items-center gap-1.5">
+                      <Lock className="w-3 h-3 shrink-0" />
+                      <span>{t('modeLockedHint')}</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
 
+            {/* ================= STEP: PLAY WITH PERSON (OFFLINE) -> MATCH SETUP (NO STOCKFISH STRENGTH) ================= */}
+            {homeStep === 'person-offline-setup' && (
+              <div
+                key="home-step-person-offline-setup"
+                className="max-w-[680px] w-full mx-auto flex flex-col gap-4 anim-view-enter"
+                data-testid="person-offline-setup-view"
+              >
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setHomeStep('person-select')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer anim-interactive"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>{t('backToPlayWithPerson')}</span>
+                  </button>
+                </div>
+
+                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm">
+                  <div className="pb-4 border-b border-[var(--app-border)] flex items-center gap-3.5">
+                    <div
+                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
+                      style={{ backgroundColor: 'rgba(80, 137, 198, 0.16)' }}
+                    >
+                      <Users className="w-5 h-5 text-[#5089C6]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[var(--app-accent)]">{t('setupLocalLabel')}</div>
+                      <h2 className="text-lg sm:text-xl font-extrabold text-[var(--app-text)] mt-0.5 truncate">
+                        {t('modeLocalTitle')} · {t('personOfflineTitle')}
+                      </h2>
+                    </div>
+                  </div>
+
+                  {/* Time Control */}
+                  <div>
+                    <span className="block text-xs font-semibold text-[var(--app-text-muted)] mb-2">
+                      {t('timeControl')}
+                    </span>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {TIME_CONTROLS.map((tc) => {
+                        const selected = tc.id === matchSettings.timeControlId;
+                        return (
+                          <button
+                            key={tc.id}
+                            type="button"
+                            onClick={() =>
+                              onChangeMatchSettings({ ...matchSettings, mode: 'local', timeControlId: tc.id })
+                            }
+                            className={`py-2 px-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap truncate cursor-pointer anim-interactive ${
+                              tc.id === 'unlimited' ? 'col-span-2' : ''
+                            } ${
+                              selected
+                                ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                                : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                            }`}
+                          >
+                            {tc.id === 'unlimited' ? t('unlimited') : tc.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Play As */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-[var(--app-text-muted)]">{t('playAs')}</span>
+                    <div className="grid grid-cols-3 gap-1.5 flex-1 min-w-[190px] max-w-[280px]">
+                      {(
+                        [
+                          { id: 'w', label: t('white') },
+                          { id: 'random', label: t('random') },
+                          { id: 'b', label: t('black') },
+                        ] as { id: PlayerSideChoice; label: string }[]
+                      ).map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() =>
+                            onChangeMatchSettings({ ...matchSettings, mode: 'local', playerSide: s.id })
+                          }
+                          className={`px-2 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer text-center truncate anim-interactive ${
+                            matchSettings.playerSide === s.id
+                              ? 'bg-[var(--app-accent-soft)] border-[var(--app-accent)] text-[var(--app-text)]'
+                              : 'bg-[var(--app-surface-2)] border-[var(--app-border)] text-[var(--app-text-muted)]'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-start="true"
+                    data-testid="start-person-offline-match"
+                    onClick={() => onStartMatch({ ...matchSettings, mode: 'local' })}
+                    className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
+                  >
+                    <Swords className="w-4 h-4" />
+                    <span>{t('startMatch')}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ================= STEP: ANALYSIS & MATCH RATING SETUP ================= */}
+            {homeStep === 'analysis-setup' && (
+              <div
+                key="home-step-analysis"
+                className="max-w-[680px] w-full mx-auto flex flex-col gap-4 anim-view-enter"
+                data-testid="analysis-setup-view"
+              >
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setHomeStep('root')}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--app-surface)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border)] text-xs font-bold text-[var(--app-text-muted)] hover:text-[var(--app-text)] transition-colors cursor-pointer anim-interactive"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>{t('backToModes')}</span>
+                  </button>
+                </div>
+
+                <div className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-xl p-5 sm:p-6 flex flex-col gap-5 shadow-sm">
+                  <div className="pb-4 border-b border-[var(--app-border)] flex items-center gap-3.5">
+                    <div
+                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/10"
+                      style={{ backgroundColor: 'rgba(27, 173, 166, 0.16)' }}
+                    >
+                      <Award className="w-5 h-5 text-[#1BADA6]" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[var(--app-accent)]">{t('setupReviewLabel')}</div>
+                      <h2 className="text-lg sm:text-xl font-extrabold text-[var(--app-text)] mt-0.5 truncate">
+                        {t('modeAnalysisTitle')}
+                      </h2>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-[var(--app-text-muted)] leading-relaxed -mt-1">{t('analysisIntro')}</p>
+
+                  <form onSubmit={handleQuickRateSubmit} className="flex flex-col gap-3">
+                    <label htmlFor="hub-pgn-rate" className="text-xs font-semibold text-[var(--app-text-muted)]">
+                      {t('pgnToRateOptional')}
+                    </label>
+                    <textarea
+                      id="hub-pgn-rate"
+                      rows={5}
+                      value={pgnQuickInput}
+                      onChange={(e) => {
+                        setPgnQuickInput(e.target.value);
+                        if (pgnQuickError) setPgnQuickError(null);
+                      }}
+                      placeholder="1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5..."
+                      className="w-full rounded-lg bg-[var(--app-surface-2)] border border-[var(--app-border-strong)] focus:border-[var(--app-accent)] focus:outline-none p-3 text-xs font-mono text-[var(--app-text)] resize-none"
+                    />
+                    {pgnQuickError && <p className="text-xs text-[#E04F4F]">{pgnQuickError}</p>}
+
+                    <div className="flex flex-col gap-2.5 pt-1">
+                      <button
+                        type="submit"
+                        className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-sm transition-colors shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer whitespace-nowrap anim-interactive"
+                      >
+                        {t('ratePgnMatch')}
+                      </button>
                       <button
                         type="button"
                         data-start="true"
-                        onClick={() => onStartMatch()}
-                        className="w-full py-3.5 px-5 rounded-xl bg-[var(--app-accent)] hover:bg-[var(--app-accent-hover)] text-[var(--app-accent-fg)] font-extrabold text-base tracking-tight transition-all shadow-[0_4px_0_var(--app-accent-shadow)] cursor-pointer flex items-center justify-center gap-2 whitespace-nowrap mt-1 anim-interactive"
+                        onClick={() => onOpenMatchRating()}
+                        className="w-full py-3 px-4 rounded-xl bg-[var(--app-surface-2)] hover:bg-[var(--app-surface-hover)] border border-[var(--app-border-strong)] text-[var(--app-text)] font-bold text-sm transition-colors cursor-pointer whitespace-nowrap anim-interactive"
                       >
-                        <Swords className="w-4 h-4" />
-                        <span>
-                          {matchSettings.mode === 'stockfish' ? t('startPlayStockfish') : t('startPassPlay')}
-                        </span>
+                        {t('openAnalysisBoard')}
                       </button>
-                    </>
-                  )}
+                    </div>
+                  </form>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
