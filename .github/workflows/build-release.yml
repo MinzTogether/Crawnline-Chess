@@ -22,8 +22,8 @@ env:
   ELECTRON_BUILDER_VERSION: '^26'
 
 jobs:
-  web:
-    name: Build web & checks
+  prepare-app:
+    name: Prepare app assets & checks
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -32,7 +32,9 @@ jobs:
 
       - name: Resolve version from tag
         id: meta
+        shell: bash
         run: |
+          set -euo pipefail
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             TAG="$GITHUB_REF_NAME"
             VERSION=$(echo "$TAG" | sed -E 's/^(Android-|Windows-)?v//')
@@ -63,23 +65,35 @@ jobs:
       - name: Unit tests
         run: npx tsx --test "src/**/*.test.ts"
 
-      - name: Build
+      # Build the frontend bundle because the Android and Windows apps embed it.
+      # This does NOT publish a website or create a web-release artifact.
+      - name: Build embedded app assets
         run: bun run build
 
-      - name: Upload dist (for Android/Windows jobs)
+      - name: Verify app assets
+        run: |
+          set -euo pipefail
+          test -s dist/index.html || {
+            echo "::error::Không tìm thấy dist/index.html sau khi build ứng dụng."
+            exit 1
+          }
+          echo "App assets are ready for Android and Windows packaging."
+
+      - name: Upload app assets for packaging only
         uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist
+          name: app-assets
+          path: dist/
           retention-days: 1
+          if-no-files-found: error
 
   android:
     name: Android APK
-    needs: web
+    needs: prepare-app
     if: github.ref_type != 'tag' || !startsWith(github.ref_name, 'Windows-v')
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ needs.web.outputs.version }}
+      VERSION: ${{ needs.prepare-app.outputs.version }}
     steps:
       - uses: actions/setup-node@v4
         with:
@@ -97,13 +111,15 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - uses: actions/download-artifact@v4
+      - name: Download app assets
+        uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: app-assets
           path: dist
 
       - name: Generate Capacitor Android project
         run: |
+          set -euo pipefail
           mkdir android-shell
           cp -r dist android-shell/dist
           cd android-shell
@@ -120,7 +136,7 @@ jobs:
           sed -i -E "s/versionCode [0-9]+/versionCode ${GITHUB_RUN_NUMBER}/; s/versionName \"[^\"]*\"/versionName \"${VERSION}\"/" android/app/build.gradle
           grep -nE "versionCode|versionName" android/app/build.gradle
 
-      - name: Build APK
+      - name: Build exactly one APK
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -165,22 +181,31 @@ jobs:
             cp app/build/outputs/apk/debug/app-debug.apk "$OUT-debug.apk"
           fi
 
-      - uses: actions/upload-artifact@v4
+          APK_COUNT=$(find "$GITHUB_WORKSPACE/out" -maxdepth 1 -type f -name '*.apk' | wc -l)
+          if [ "$APK_COUNT" -ne 1 ]; then
+            echo "::error::Yêu cầu đúng 1 APK, nhưng tìm thấy $APK_COUNT file."
+            find "$GITHUB_WORKSPACE/out" -maxdepth 1 -type f -print
+            exit 1
+          fi
+          ls -lah "$GITHUB_WORKSPACE/out"
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
         with:
           name: release-android
           path: out/*.apk
           if-no-files-found: error
 
   windows:
-    name: Windows (.exe)
-    needs: web
+    name: Windows (2 EXE)
+    needs: prepare-app
     if: github.ref_type != 'tag' || !startsWith(github.ref_name, 'Android-v')
     runs-on: windows-latest
     defaults:
       run:
         shell: bash
     env:
-      VERSION: ${{ needs.web.outputs.version }}
+      VERSION: ${{ needs.prepare-app.outputs.version }}
       OWNER: ${{ github.repository_owner }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
@@ -188,13 +213,15 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: actions/download-artifact@v4
+      - name: Download app assets
+        uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: app-assets
           path: dist
 
       - name: Create Electron shell
         run: |
+          set -euo pipefail
           mkdir shell
           cp -r dist shell/dist
           cd shell
@@ -359,13 +386,28 @@ jobs:
         working-directory: shell
         run: npx electron-builder --win --x64 --publish never
 
-      - name: Collect artifacts
+      - name: Collect exactly two EXE files
         run: |
-          mkdir out
-          cp shell/release/*.exe out/
-          ls -la out
+          set -euo pipefail
+          mkdir -p out
+          mapfile -t EXES < <(find shell/release -maxdepth 1 -type f -name '*.exe' -print | sort)
+          if [ "${#EXES[@]}" -ne 2 ]; then
+            echo "::error::Yêu cầu đúng 2 EXE (Setup + Portable), nhưng tìm thấy ${#EXES[@]} file."
+            find shell/release -maxdepth 1 -type f -print || true
+            exit 1
+          fi
 
-      - uses: actions/upload-artifact@v4
+          SETUP="shell/release/${APP_SLUG}-${VERSION}-Windows-x64-Setup.exe"
+          PORTABLE="shell/release/${APP_SLUG}-${VERSION}-Windows-x64-Portable.exe"
+          test -f "$SETUP" || { echo "::error::Thiếu file Setup: $SETUP"; exit 1; }
+          test -f "$PORTABLE" || { echo "::error::Thiếu file Portable: $PORTABLE"; exit 1; }
+
+          cp "$SETUP" "$PORTABLE" out/
+          test "$(find out -maxdepth 1 -type f -name '*.exe' | wc -l)" -eq 2
+          ls -lah out
+
+      - name: Upload Windows EXE files
+        uses: actions/upload-artifact@v4
         with:
           name: release-windows
           path: out/*.exe
@@ -373,7 +415,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [web, android, windows]
+    needs: [prepare-app, android, windows]
     if: ${{ !cancelled() && github.ref_type == 'tag' && !contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     permissions:
@@ -382,7 +424,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
-      VERSION: ${{ needs.web.outputs.version }}
+      VERSION: ${{ needs.prepare-app.outputs.version }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -392,7 +434,34 @@ jobs:
 
       - name: Create or update release
         run: |
-          ls -la release
+          set -euo pipefail
+          ls -lah release
+          APK_COUNT=$(find release -maxdepth 1 -type f -name '*.apk' | wc -l)
+          EXE_COUNT=$(find release -maxdepth 1 -type f -name '*.exe' | wc -l)
+          case "$TAG" in
+            Android-v*)
+              EXPECTED_APK=1
+              EXPECTED_EXE=0
+              ;;
+            Windows-v*)
+              EXPECTED_APK=0
+              EXPECTED_EXE=2
+              ;;
+            v*)
+              EXPECTED_APK=1
+              EXPECTED_EXE=2
+              ;;
+            *)
+              echo "::error::Tag không được hỗ trợ: $TAG"
+              exit 1
+              ;;
+          esac
+
+          if [ "$APK_COUNT" -ne "$EXPECTED_APK" ] || [ "$EXE_COUNT" -ne "$EXPECTED_EXE" ]; then
+            echo "::error::Sai số lượng file. Mong đợi APK=$EXPECTED_APK, EXE=$EXPECTED_EXE; thực tế APK=$APK_COUNT, EXE=$EXE_COUNT."
+            exit 1
+          fi
+
           FLAGS=""
           case "$VERSION" in *-*) FLAGS="--prerelease" ;; esac
           if gh release view "$TAG" > /dev/null 2>&1; then
