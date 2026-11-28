@@ -1,9 +1,9 @@
 # Build & Release — Crownline Chess
 #
 # Tag kích hoạt:
-#   v*          -> build Web + Android (APK) + Windows (.exe) rồi tạo Release
-#   Android-v*  -> chỉ build Android (APK) rồi tạo Release
-#   Windows-v*  -> chỉ build Windows (.exe) rồi tạo Release
+#   v*          -> build Android (1 file .apk) + Windows (2 file .exe) rồi tạo Release
+#   Android-v*  -> chỉ build Android (1 file .apk) rồi tạo Release
+#   Windows-v*  -> chỉ build Windows (2 file .exe: Setup + Portable) rồi tạo Release
 # Tag phải có dạng semver: v1.2.3 / Android-v1.2.3 / Windows-v1.2.3-beta.1
 #
 # Chạy tay (workflow_dispatch): build tất cả, chỉ lưu artifact, KHÔNG tạo Release.
@@ -36,9 +36,9 @@ env:
   ELECTRON_BUILDER_VERSION: '^26'
 
 jobs:
-  # ---------------------------------------------------------------- Web
+  # ------------------------------------------------------ Build web + checks
   web:
-    name: Web build & checks
+    name: Build web & checks
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -88,22 +88,6 @@ jobs:
           path: dist
           retention-days: 1
 
-      - name: Package web zip (v* only)
-        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-        env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: |
-          mkdir -p out
-          (cd dist && zip -r "$GITHUB_WORKSPACE/out/${APP_SLUG}-${VERSION}-Web.zip" .)
-
-      - name: Upload web zip
-        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-web
-          path: out/*.zip
-          if-no-files-found: error
-
   # ------------------------------------------------------------ Android
   android:
     name: Android APK
@@ -122,10 +106,7 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
+      - uses: android-actions/setup-android@v3
 
       - uses: gradle/actions/setup-gradle@v4
 
@@ -426,4 +407,3 @@ jobs:
           else
             gh release create "$TAG" release/* --title "$TAG" --generate-notes $FLAGS
           fi
-          
