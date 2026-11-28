@@ -1,127 +1,148 @@
 name: Discord Notify
 
-# Đặt file này tại: .github/workflows/discord-notify.yml (nhánh main)
-# Cần tạo secret: Settings → Secrets and variables → Actions → DISCORD_WEBHOOK_URL
-
 on:
-  # 1) Commit mới đẩy lên nhánh main
   push:
-    branches: [main]
-
-  # 2) Release mới: chạy sau khi workflow build/release của bạn hoàn tất.
-  #    Lý do không dùng `on: release`: release tạo bằng GITHUB_TOKEN
-  #    sẽ KHÔNG kích hoạt workflow khác.
+    branches:
+      - main
   workflow_run:
-    workflows: ["CI Build & Release"] # ⚠️ ĐỔI thành `name:` của workflow build/release hiện có
-    types: [completed]
+    workflows:
+      - "Build & Release"
+    types:
+      - completed
 
 permissions:
   contents: read
 
 jobs:
-  commit:
-    name: Thông báo commit mới
-    if: github.event_name == 'push'
+  build:
+    if: github.event_name == 'push' && !github.event.deleted
     runs-on: ubuntu-latest
     steps:
-      - name: Gửi embed commit tới Discord
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run lint
+
+      - name: Unit tests
+        run: npx tsx --test "src/**/*.test.ts"
+
+      - name: Build
+        run: bun run build
+
+  notify-commit:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send commit notification
         env:
-          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ github.ref_name }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           set -euo pipefail
-          [ -n "$WEBHOOK" ] || { echo "::error::Thiếu secret DISCORD_WEBHOOK_URL"; exit 1; }
 
-          count=$(jq '(.commits // []) | length' "$GITHUB_EVENT_PATH")
-          if [ "$count" -eq 0 ]; then
-            echo "Không có commit mới, bỏ qua."
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "::error::Missing DISCORD_WEBHOOK_URL repository secret"
+            exit 1
+          fi
+
+          if [ "$(jq '.commits | length' "$GITHUB_EVENT_PATH")" -eq 0 ]; then
+            echo "No commits in this push, skipping"
             exit 0
           fi
 
-          payload=$(jq -c --arg repo "$REPO" --arg branch "$BRANCH" '
-            def short($n): if length > $n then .[:$n] + "…" else . end;
-            . as $ev
-            | ($ev.commits // []) as $commits
+          jq '
+            def trunc($n): if length > $n then .[0:$n - 1] + "…" else . end;
+            def esc: gsub("(?<c>[\\\\`*_~|\\[\\]<>])"; "\\" + .c);
+            (.commits | length) as $count
+            | (.ref | sub("^refs/heads/"; "")) as $branch
             | {
                 username: "Crawnline Chess",
-                allowed_mentions: { parse: [] },
+                allowed_mentions: {parse: []},
                 embeds: [{
-                  title: "📝 \($commits | length) commit mới trên \($branch)",
-                  url: $ev.compare,
+                  author: {name: .sender.login, icon_url: .sender.avatar_url, url: .sender.html_url},
+                  title: ("[\(.repository.name):\($branch)] \($count) new commit\(if $count == 1 then "" else "s" end)" | trunc(256)),
+                  url: (if $count == 1 then .head_commit.url else .compare end),
+                  description: ((.commits[0:10] | map("[`\(.id[0:7])`](\(.url)) \(.message | split("\n")[0] | trunc(72) | esc) - \(.author.name | esc)") | join("\n")) + (if $count > 10 then "\n…and \($count - 10) more" else "" end)),
                   color: 5793266,
-                  author: {
-                    name: $ev.sender.login,
-                    icon_url: $ev.sender.avatar_url,
-                    url: $ev.sender.html_url
-                  },
-                  description: (
-                    ($commits[:10] | map("[`\(.id[:7])`](\(.url)) \(.message | split("\n")[0] | short(80)) — \(.author.name)") | join("\n"))
-                    + (if ($commits | length) > 10 then "\n…và \(($commits | length) - 10) commit khác" else "" end)
-                  ),
-                  footer: { text: $repo },
-                  timestamp: (now | todate)
+                  fields: [
+                    {name: "Releases", value: "[Open releases page](\(.repository.html_url)/releases)", inline: false}
+                  ],
+                  timestamp: .head_commit.timestamp,
+                  footer: {text: .repository.full_name}
                 }]
-              }' "$GITHUB_EVENT_PATH")
+              }
+          ' "$GITHUB_EVENT_PATH" > payload.json
 
-          curl -sS --fail-with-body -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"
+          curl -fsS --retry 3 \
+            -H "Content-Type: application/json" \
+            --data-binary @payload.json \
+            "$DISCORD_WEBHOOK_URL"
 
-  release:
-    name: Thông báo release mới
-    if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success'
+  notify-release:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Gửi embed release tới Discord
+      - name: Send release notification
         env:
           GH_TOKEN: ${{ github.token }}
-          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          REPO: ${{ github.repository }}
-          # Với run kích hoạt bởi tag, head_branch chính là tên tag
+          GH_REPO: ${{ github.repository }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TAG: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
-          [ -n "$WEBHOOK" ] || { echo "::error::Thiếu secret DISCORD_WEBHOOK_URL"; exit 1; }
 
-          case "$TAG" in
-            v*|Android-v*|Windows-v*) ;;
-            *) echo "'$TAG' không phải tag release, bỏ qua."; exit 0 ;;
-          esac
+          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
+            echo "::error::Missing DISCORD_WEBHOOK_URL repository secret"
+            exit 1
+          fi
 
-          if ! release=$(gh release view "$TAG" --repo "$REPO" \
-              --json tagName,name,url,body,isDraft,isPrerelease,publishedAt,assets 2>/dev/null); then
-            echo "Chưa có release cho tag $TAG, bỏ qua."
+          if ! gh release view "$TAG" \
+            --json tagName,name,url,body,isDraft,isPrerelease,publishedAt,targetCommitish \
+            > release.json 2> /dev/null; then
+            echo "No release found for '$TAG', skipping"
             exit 0
           fi
 
-          if [ "$(jq -r '.isDraft' <<<"$release")" = "true" ]; then
-            echo "Release đang là draft, bỏ qua."
+          if [ "$(jq -r '.isDraft' release.json)" = "true" ]; then
+            echo "Release is a draft, skipping"
             exit 0
           fi
 
-          payload=$(jq -nc --argjson r "$release" --arg repo "$REPO" '
-            def short($n): if length > $n then .[:$n] + "…" else . end;
-            ($r.assets | map("[\(.name)](\(.url))") | join("\n")) as $files
+          jq --arg repo "$GH_REPO" --arg releases "$GITHUB_SERVER_URL/$GH_REPO/releases" '
+            def trunc($n): if length > $n then .[0:$n - 1] + "…" else . end;
+            ((.name | select(. != null and . != "")) // .tagName) as $title
+            | . as $r
             | {
                 username: "Crawnline Chess",
-                allowed_mentions: { parse: [] },
+                allowed_mentions: {parse: []},
                 embeds: [{
-                  title: "🚀 Release mới: \($r.name // $r.tagName)",
+                  title: ("\(if $r.isPrerelease then "New pre-release" else "New release" end): \($title)" | trunc(256)),
                   url: $r.url,
-                  color: (if $r.isPrerelease then 16753920 else 5763719 end),
-                  description: (
-                    ($r.body // "" | short(1500))
-                    | if . == "" then "_Không có ghi chú phát hành._" else . end
-                  ),
+                  description: (($r.body // "") | if . == "" then "No release notes provided." else trunc(3500) end),
+                  color: (if $r.isPrerelease then 16705372 else 5763719 end),
                   fields: [
-                    { name: "Tag", value: "`\($r.tagName)`", inline: true },
-                    { name: "Loại", value: (if $r.isPrerelease then "Pre-release" else "Stable" end), inline: true },
-                    { name: "Tải về", value: (if $files == "" then "—" else ($files | short(1000)) end) }
+                    {name: "Tag", value: ("`" + $r.tagName + "`"), inline: true},
+                    {name: "Target", value: ("`" + $r.targetCommitish + "`"), inline: true},
+                    {name: "Releases", value: "[View this release](\($r.url)) • [All releases](\($releases))", inline: false}
                   ],
-                  footer: { text: $repo },
-                  timestamp: ($r.publishedAt // (now | todate))
+                  timestamp: $r.publishedAt,
+                  footer: {text: $repo}
                 }]
-              }')
+              }
+          ' release.json > payload.json
 
-          curl -sS --fail-with-body -H "Content-Type: application/json" -d "$payload" "$WEBHOOK"
+          curl -fsS --retry 3 \
+            -H "Content-Type: application/json" \
+            --data-binary @payload.json \
+            "$DISCORD_WEBHOOK_URL"
