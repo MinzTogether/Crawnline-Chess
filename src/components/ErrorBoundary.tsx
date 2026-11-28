@@ -1,11 +1,13 @@
 import React from 'react';
-import { resetStoredPreferences } from '../types/preferences';
+import { resetStoredPreferences, type StorageLike } from '../types/preferences';
 
-interface ErrorBoundaryProps {
+export interface ErrorBoundaryProps {
   children: React.ReactNode;
+  onReload?: () => void;
+  storage?: StorageLike | null;
 }
 
-interface ErrorBoundaryState {
+export interface ErrorBoundaryState {
   hasError: boolean;
   errorMessage: string;
 }
@@ -31,12 +33,25 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     console.error('Application render error:', error, info.componentStack);
   }
 
-  private handleReload = () => {
+  resetError = (): void => {
+    this.setState({ hasError: false, errorMessage: '' });
+  };
+
+  handleReload = (): void => {
+    if (this.props.onReload) {
+      this.props.onReload();
+      return;
+    }
     window.location.reload();
   };
 
-  private handleResetAndReload = () => {
-    resetStoredPreferences();
+  handleResetAndReload = (): void => {
+    resetStoredPreferences(this.props.storage);
+    this.resetError();
+    if (this.props.onReload) {
+      this.props.onReload();
+      return;
+    }
     window.location.reload();
   };
 

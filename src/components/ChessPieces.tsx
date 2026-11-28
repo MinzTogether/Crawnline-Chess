@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Color, PieceSymbol } from 'chess.js';
 import { PIECE_STYLES, type PieceStyleId } from '../types/preferences';
+import { resolvePublicAssetUrl } from '../utils/assetUrl';
 
 interface ChessPieceProps {
   type: PieceSymbol;
@@ -16,7 +17,7 @@ export function getPieceSpriteUrl(
 ): string | null {
   const palette = PIECE_STYLES[pieceStyle] ?? PIECE_STYLES.classic;
   if (!palette.spriteBasePath) return null;
-  return `${palette.spriteBasePath}/${color}${type}.png`;
+  return resolvePublicAssetUrl(`${palette.spriteBasePath}/${color}${type}.png`);
 }
 
 /**

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Chess } from 'chess.js';
+import { Chess, type Square } from 'chess.js';
 import {
   applyChess960Move,
   canCastleChess960,
@@ -12,7 +12,7 @@ import {
   uciLineToSan960,
   type Chess960CastlingRights,
 } from './chess960';
-import { buildPgn, parsePgnOrFen } from './chessLogic';
+import { buildPgn, evaluateGameTermination, parsePgnOrFen } from './chessLogic';
 import type { MoveRecord } from '../types/chess';
 
 test('Scharnagl numbering generates exact official Chess960 positions for #0, #518, #959 and all 960 unique IDs', () => {
@@ -294,7 +294,7 @@ test('Chess960 full PGN build -> parse round-trip preserves Shredder-FEN, O-O, O
   let curRights = pos.castlingRights;
 
   // 1. f4 f5 2. Rf3 Rf6 3. O-O O-O (both kings stay on g1/g8, h-rooks jump to f1/f8)
-  const seq: Array<[string, string]> = [
+  const seq: Array<[Square, Square]> = [
     ['f2', 'f4'],
     ['f7', 'f5'],
     ['f1', 'f3'],
@@ -305,7 +305,7 @@ test('Chess960 full PGN build -> parse round-trip preserves Shredder-FEN, O-O, O
 
   for (let i = 0; i < seq.length; i++) {
     const [from, to] = seq[i];
-    const res = applyChess960Move(curFen, curRights, from as any, to as any);
+    const res = applyChess960Move(curFen, curRights, from, to);
     assert.ok(res, `Move ${from}->${to} failed at ply ${i + 1}`);
     moves.push({
       ply: i + 1,
@@ -365,4 +365,89 @@ test('Chess960 full PGN build -> parse round-trip preserves Shredder-FEN, O-O, O
     assert.equal(stdParsed.variant, undefined);
     assert.equal(stdParsed.moves[8].san, 'O-O');
   }
+});
+
+test('Chess960 castling permanently revokes rights after king moves and returns, blocks castling out of check, and escapes stalemate', () => {
+  // 1. King moves 1 square and returns -> BOTH wK and wQ rights permanently revoked
+  const startFen = '4k3/8/8/8/8/8/8/1R2K2R w - - 0 1';
+  const startRights: Chess960CastlingRights = { wK: 7, wQ: 1, bK: null, bQ: null };
+  const kingOut = applyChess960Move(startFen, startRights, 'e1', 'e2');
+  assert.ok(kingOut);
+  assert.equal(kingOut.castlingRightsAfter.wK, null);
+  assert.equal(kingOut.castlingRightsAfter.wQ, null);
+
+  const blackReply = applyChess960Move(kingOut.fenAfter, kingOut.castlingRightsAfter, 'e8', 'd8');
+  assert.ok(blackReply);
+  const kingBack = applyChess960Move(blackReply.fenAfter, blackReply.castlingRightsAfter, 'e2', 'e1');
+  assert.ok(kingBack);
+  const blackReply2 = applyChess960Move(kingBack.fenAfter, kingBack.castlingRightsAfter, 'd8', 'e8');
+  assert.ok(blackReply2);
+
+  assert.equal(canCastleChess960(blackReply2.fenAfter, blackReply2.castlingRightsAfter, 'k').legal, false);
+  assert.equal(canCastleChess960(blackReply2.fenAfter, blackReply2.castlingRightsAfter, 'q').legal, false);
+  assert.equal(applyChess960Move(blackReply2.fenAfter, blackReply2.castlingRightsAfter, 'e1', 'h1'), null);
+  assert.equal(applyChess960Move(blackReply2.fenAfter, blackReply2.castlingRightsAfter, 'e1', 'b1'), null);
+
+  // 2. Castling out of check is strictly rejected even with clear lane and unmoved rook
+  const inCheckFen = '4kr2/8/8/8/8/8/8/5K1R w - - 0 1';
+  const inCheckRights: Chess960CastlingRights = { wK: 7, wQ: null, bK: null, bQ: null };
+  assert.equal(canCastleChess960(inCheckFen, inCheckRights, 'k').legal, false);
+  assert.equal(applyChess960Move(inCheckFen, inCheckRights, 'f1', 'h1'), null);
+
+  // 3. Stalemate escape via Chess960 castling: O-O (g1->h1) is White's ONLY legal move!
+  const stalemateEscapeFen = 'k4r2/8/8/8/8/7p/1q5P/6KR w - - 0 1';
+  const escapeRights: Chess960CastlingRights = { wK: 7, wQ: null, bK: null, bQ: null };
+  // Without Chess960 castling rights, chess.js has zero legal moves -> Stalemate
+  const withoutCastle = evaluateGameTermination({
+    fen: stalemateEscapeFen,
+    allowCastling: false,
+  });
+  assert.equal(withoutCastle.isOver, true);
+  assert.equal(withoutCastle.reason, 'Stalemate');
+
+  // With Chess960 castling right wK=7, White can legally castle O-O -> MUST NOT be stalemate
+  const withCastle = evaluateGameTermination({
+    fen: stalemateEscapeFen,
+    allowCastling: false,
+    chess960Rights: escapeRights,
+  });
+  assert.equal(withCastle.isOver, false);
+
+  const escapeMove = applyChess960Move(stalemateEscapeFen, escapeRights, 'g1', 'h1');
+  assert.ok(escapeMove);
+  assert.equal(escapeMove.san, 'O-O');
+  assert.equal(new Chess(escapeMove.fenAfter).get('f1')?.type, 'r');
+});
+
+test('Chess960 promotion supports underpromotion, Black rank-1 promotion, and capturing an unmoved rook revokes its castling right', () => {
+  // White pawn on e7 captures Black's unmoved Chess960 rook on f8 and promotes to Knight (exf8=N)
+  const capPromoFen = '2k2r2/4P3/8/8/8/8/8/4K3 w - - 0 1';
+  const rights: Chess960CastlingRights = { wK: null, wQ: null, bK: 5, bQ: null };
+
+  const underPromo = applyChess960Move(capPromoFen, rights, 'e7', 'f8', 'n');
+  assert.ok(underPromo);
+  assert.equal(underPromo.promotion, 'n');
+  assert.equal(underPromo.captured, 'r');
+  assert.equal(underPromo.san, 'exf8=N');
+  assert.equal(underPromo.uci, 'e7f8n');
+  // Capturing Black's unmoved rook on file f (5) MUST revoke bK castling right!
+  assert.equal(underPromo.castlingRightsAfter.bK, null);
+  assert.equal(formatShredderCastling(underPromo.castlingRightsAfter), '-');
+  assert.equal(new Chess(underPromo.fenAfter).get('f8')?.type, 'n');
+
+  // Black pawn on a2 promotes on rank 1 to Queen
+  const blackPromoFen = '4k3/8/8/8/8/8/p7/4K3 b - - 0 1';
+  const blackPromo = applyChess960Move(
+    blackPromoFen,
+    { wK: null, wQ: null, bK: null, bQ: null },
+    'a2',
+    'a1',
+    'q'
+  );
+  assert.ok(blackPromo);
+  assert.equal(blackPromo.promotion, 'q');
+  assert.equal(blackPromo.san, 'a1=Q+');
+  assert.equal(blackPromo.isCheck, true);
+  assert.equal(blackPromo.uci, 'a2a1q');
+  assert.equal(new Chess(blackPromo.fenAfter).get('a1')?.type, 'q');
 });

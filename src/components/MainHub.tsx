@@ -24,6 +24,7 @@ import {
 import {
   type AppPreferences,
   type SavedMatch,
+  type StorageWriteResult,
   type UserProfile,
 } from '../types/preferences';
 import {
@@ -74,7 +75,7 @@ interface MainHubProps {
   preferences: AppPreferences;
   onUpdatePreferences: (patch: Partial<AppPreferences>) => void;
   profile: UserProfile;
-  onUpdateProfile: (patch: Partial<UserProfile>) => void;
+  onUpdateProfile: (patch: Partial<UserProfile>) => StorageWriteResult | void;
   savedMatches: SavedMatch[];
   matchSettings: MatchSettings;
   onChangeMatchSettings: (next: MatchSettings) => void;

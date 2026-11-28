@@ -5,9 +5,13 @@
 
 let audioCtx: AudioContext | null = null;
 
+interface WindowWithWebkitAudioContext extends Window {
+  webkitAudioContext?: typeof AudioContext;
+}
+
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
-  const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  const Ctor = window.AudioContext || (window as WindowWithWebkitAudioContext).webkitAudioContext;
   if (!Ctor) return null;
   if (!audioCtx) {
     audioCtx = new Ctor();
@@ -41,6 +45,16 @@ function playWoodTap(freqStart: number, freqEnd: number, duration: number, gainP
   osc.connect(filter);
   filter.connect(gain);
   gain.connect(ctx.destination);
+
+  osc.onended = () => {
+    try {
+      osc.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    } catch {
+      // Ignore disconnect errors on already-released nodes
+    }
+  };
 
   osc.start(now);
   osc.stop(now + duration + 0.01);
@@ -77,6 +91,14 @@ export function playChessSound(type: ChessSoundType, muted: boolean) {
         gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
         osc.connect(gain);
         gain.connect(ctx.destination);
+        osc.onended = () => {
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch {
+            // Ignore disconnect errors on already-released nodes
+          }
+        };
         osc.start(now);
         osc.stop(now + 0.17);
         playWoodTap(310, 100, 0.07, 0.2);

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { Square } from 'chess.js';
 import { applyRuleMove } from './chessLogic';
 import { executeMatchReviewPass, type SinglePositionEvaluation } from './matchReview';
 import {
@@ -11,14 +12,14 @@ import type { MoveRecord } from '../types/chess';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
-function buildSampleMoves(pairs: Array<[string, string]>): MoveRecord[] {
+function buildSampleMoves(pairs: Array<[Square, Square]>): MoveRecord[] {
   const moves: MoveRecord[] = [];
   for (const [from, to] of pairs) {
     const res = applyRuleMove({
       initialFen: START_FEN,
       moves,
-      from: from as any,
-      to: to as any,
+      from,
+      to,
       allowCastling: true,
     });
     assert.ok(res);
@@ -750,5 +751,209 @@ test('Scenario 6: Chess960 Game Review sends UCI_Chess960=true + Shredder-FEN an
 
   analyzer.terminate();
 });
+
+test('Game Review cancellation after ply 2 preserves reviewed prefix, skips remaining plies, and resumes realtime analysis on the same worker', async () => {
+  const sixPlies = buildSampleMoves([
+    ['e2', 'e4'],
+    ['e7', 'e5'],
+    ['g1', 'f3'],
+    ['b8', 'c6'],
+    ['f1', 'b5'],
+    ['a7', 'a6'],
+  ]);
+  const harness = createAutoRespondingAnalyzerHarness({ evalDelayMs: 6 });
+  const analyzer = new StockfishAnalyzer(harness.factory);
+
+  let cancelled = false;
+  let evalCalls = 0;
+  const completedPlies: number[] = [];
+
+  const reviewPromise = executeMatchReviewPass({
+    initialFen: START_FEN,
+    moves: sixPlies,
+    isStandardVariant: true,
+    depth: 10,
+    evaluatePosition: (fen, depth) => {
+      evalCalls += 1;
+      return analyzer.evaluateOnce(fen, depth);
+    },
+    isCancelled: () => cancelled,
+    onMoveReviewed: ({ reviewedMoves }) => {
+      const done = reviewedMoves.filter((m) => Boolean(m.classification)).length;
+      completedPlies.push(done);
+      if (done === 2) {
+        cancelled = true;
+        analyzer.stop();
+      }
+    },
+  });
+
+  const res = await reviewPromise;
+  assert.equal(res.completed, false);
+  assert.equal(res.cancelled, true);
+  assert.equal(res.error, null);
+  assert.deepEqual(completedPlies, [1, 2]);
+  // Initial FEN + ply 1 + ply 2 = 3 evaluations only; plies 3..6 MUST NOT be evaluated
+  assert.equal(evalCalls, 3);
+  assert.ok(res.reviewedMoves[0].classification);
+  assert.ok(res.reviewedMoves[1].classification);
+  assert.equal(res.reviewedMoves[2].classification, undefined);
+  assert.equal(res.reviewedMoves[5].classification, undefined);
+
+  // Realtime analysis must resume cleanly on the same StockfishAnalyzer without rebooting
+  const liveDepths: number[] = [];
+  await analyzer.analyzePosition(
+    sixPlies[5].fenAfter,
+    { depth: 12, multiPv: 1 },
+    (snap) => {
+      liveDepths.push(snap.depth);
+    }
+  );
+  await new Promise((r) => setTimeout(r, 25));
+
+  assert.ok(liveDepths.length >= 1);
+  assert.equal(harness.getBootCount(), 1);
+  analyzer.terminate();
+});
+
+test('Game Review restart recovers immediately after cancellation and replaces completed evaluations cleanly without mutating prior snapshots', async () => {
+  const sampleMoves = buildSampleMoves([
+    ['e2', 'e4'],
+    ['e7', 'e5'],
+    ['g1', 'f3'],
+    ['b8', 'c6'],
+  ]);
+  const harness = createAutoRespondingAnalyzerHarness({ evalDelayMs: 10 });
+  const analyzer = new StockfishAnalyzer(harness.factory);
+
+  // Part A: Start Review #1, cancel mid-way, then immediately restart Review #2 on the same analyzer
+  let activeRun = 1;
+  const run1 = activeRun;
+  const firstAttempt = executeMatchReviewPass({
+    initialFen: START_FEN,
+    moves: sampleMoves,
+    isStandardVariant: true,
+    depth: 10,
+    evaluatePosition: (fen, depth) => analyzer.evaluateOnce(fen, depth),
+    isCancelled: () => activeRun !== run1,
+  });
+
+  await new Promise((r) => setTimeout(r, 18));
+  activeRun += 1;
+  analyzer.stop();
+
+  const run2 = activeRun;
+  const restartedAttempt = executeMatchReviewPass({
+    initialFen: START_FEN,
+    moves: sampleMoves,
+    isStandardVariant: true,
+    depth: 10,
+    evaluatePosition: (fen, depth) => analyzer.evaluateOnce(fen, depth),
+    isCancelled: () => activeRun !== run2,
+  });
+
+  const [firstRes, restartedRes] = await Promise.all([firstAttempt, restartedAttempt]);
+  assert.equal(firstRes.completed, false);
+  assert.equal(firstRes.cancelled, true);
+  assert.equal(restartedRes.completed, true);
+  assert.equal(restartedRes.cancelled, false);
+  assert.equal(restartedRes.error, null);
+  assert.equal(restartedRes.reviewedMoves.length, 4);
+  for (const m of restartedRes.reviewedMoves) {
+    assert.ok(m.classification);
+    assert.ok(m.evalAfter);
+  }
+  assert.deepEqual(analyzer.getQueueState(), {
+    phase: 'idle',
+    isRunning: true,
+    backend: 'wasm',
+    activeJobMode: null,
+    queuedJobMode: null,
+    pendingSyncCount: 0,
+  });
+
+  // Part B: Re-run Game Review after completion with new engine evaluations -> isolates prior snapshot cleanly
+  const firstPassSnapshot = restartedRes.reviewedMoves.map((m) => ({
+    ply: m.ply,
+    evalAfter: m.evalAfter,
+    accuracy: m.accuracy,
+  }));
+
+  const rerunRes = await executeMatchReviewPass({
+    initialFen: START_FEN,
+    moves: restartedRes.reviewedMoves,
+    isStandardVariant: true,
+    depth: 12,
+    evaluatePosition: async (_fen, _depth) => okEval(150, 'e2e4'),
+    isCancelled: () => false,
+  });
+
+  assert.equal(rerunRes.completed, true);
+  assert.equal(rerunRes.error, null);
+  assert.deepEqual(rerunRes.reviewedMoves[0].evalAfter, { type: 'cp', value: 150 });
+  // Previous completed array MUST remain untouched (no cross-pass mutation)
+  assert.deepEqual(
+    restartedRes.reviewedMoves.map((m) => ({
+      ply: m.ply,
+      evalAfter: m.evalAfter,
+      accuracy: m.accuracy,
+    })),
+    firstPassSnapshot
+  );
+
+  analyzer.terminate();
+});
+
+test('executeMatchReviewPass deduplicates repeated positions within a single pass while evaluating fresh on separate passes', async () => {
+  // 1. Nf3 Nf6 2. Ng1 Ng8 returns to the exact starting position (same normalized FEN key)
+  const repetitionMoves = buildSampleMoves([
+    ['g1', 'f3'],
+    ['g8', 'f6'],
+    ['f3', 'g1'],
+    ['f6', 'g8'],
+  ]);
+
+  let pass1Calls = 0;
+  const pass1 = await executeMatchReviewPass({
+    initialFen: START_FEN,
+    moves: repetitionMoves,
+    isStandardVariant: true,
+    depth: 10,
+    evaluatePosition: async () => {
+      pass1Calls += 1;
+      return okEval(20, 'e2e4');
+    },
+    isCancelled: () => false,
+  });
+
+  assert.equal(pass1.completed, true);
+  // 5 FENs total (initial + 4 plies), but ply 4 repeats the initial FEN key -> only 4 engine calls needed
+  assert.equal(pass1Calls, 4);
+  assert.equal(pass1.reviewedMoves.length, 4);
+  for (const m of pass1.reviewedMoves) {
+    assert.ok(m.evalAfter);
+    assert.ok(m.classification);
+  }
+
+  // A new separate review pass must NOT reuse pass 1's cache (e.g., if depth or engine changed)
+  let pass2Calls = 0;
+  const pass2 = await executeMatchReviewPass({
+    initialFen: START_FEN,
+    moves: repetitionMoves,
+    isStandardVariant: true,
+    depth: 12,
+    evaluatePosition: async () => {
+      pass2Calls += 1;
+      return okEval(45, 'd2d4');
+    },
+    isCancelled: () => false,
+  });
+
+  assert.equal(pass2.completed, true);
+  assert.equal(pass2Calls, 4);
+  assert.deepEqual(pass2.reviewedMoves[3].evalAfter, { type: 'cp', value: 45 });
+});
+
+
 
 

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { Square } from 'chess.js';
 import {
   checkClockBeforeMove,
   commitMoveClock,
@@ -8,7 +9,10 @@ import {
   pauseClockState,
   quantizeClockDisplay,
   resumeClockState,
+  type ClockState,
 } from './clock';
+import { applyRuleMove, evaluateGameTermination } from './chessLogic';
+import type { MoveRecord } from '../types/chess';
 
 test('clock starts ticking immediately when entering playing at ply 0 using exact timestamps', () => {
   const t0 = 1_000_000;
@@ -139,4 +143,203 @@ test('multi-turn timeout flow rejects Black move after flagging while preserving
   assert.equal(blackCheck.nextState.w, 9);
   assert.equal(blackCheck.nextState.b, 0);
   assert.equal(blackCheck.nextState.turnStartedAtMs, null);
+});
+
+test('clock timeout exact 0ms boundary flags cleanly, backward system clock skew never adds free time, and gameEnded freezes clock', () => {
+  const t0 = 20_000_000;
+  const running = createClockState(5, 'w', t0);
+
+  // Exact boundary: elapsed === remaining (5000ms on a 5s clock) MUST flag, NOT allow
+  const atZero = getClockRemaining(running, t0 + 5000);
+  assert.equal(atZero.w, 0);
+  assert.equal(atZero.expiredColor, 'w');
+
+  const preMoveAtZero = checkClockBeforeMove(running, 'w', t0 + 5000);
+  assert.equal(preMoveAtZero.allowed, false);
+  assert.equal(preMoveAtZero.expiredColor, 'w');
+  assert.equal(preMoveAtZero.nextState.turnStartedAtMs, null);
+
+  // Backward system clock jump (e.g. NTP adjustment -1500ms) clamps elapsed to 0 and never grants extra time
+  const skewed = getClockRemaining(running, t0 - 1500);
+  assert.equal(skewed.w, 5);
+  assert.equal(skewed.b, 5);
+  assert.equal(skewed.expiredColor, null);
+
+  const skewedCommit = commitMoveClock(running, 'w', 'b', 0, t0 - 1500, false);
+  assert.equal(skewedCommit.expiredColor, null);
+  assert.equal(skewedCommit.nextState.w, 5);
+  assert.equal(skewedCommit.nextState.activeTurn, 'b');
+
+  // Committing a game-ending move freezes the clock immediately (turnStartedAtMs === null)
+  const gameOverCommit = commitMoveClock(running, 'w', 'b', 2, t0 + 1200, true);
+  assert.equal(gameOverCommit.expiredColor, null);
+  assert.equal(gameOverCommit.nextState.w, 5.8); // 5 - 1.2 + 2 = 5.8
+  assert.equal(gameOverCommit.nextState.turnStartedAtMs, null);
+  // Time passing after game ends MUST NOT drain either player's clock
+  const longAfterEnd = getClockRemaining(gameOverCommit.nextState, t0 + 999_999);
+  assert.equal(longAfterEnd.w, 5.8);
+  assert.equal(longAfterEnd.b, 5);
+  assert.equal(longAfterEnd.expiredColor, null);
+});
+
+test('move commit ordering enforces clock-check -> rule-validation -> board-commit -> clock-commit invariants', () => {
+  const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+  interface MatchState {
+    initialFen: string;
+    fen: string;
+    moves: MoveRecord[];
+    clock: ClockState;
+    incrementSec: number;
+    timedOutBy: 'w' | 'b' | null;
+  }
+
+  function attemptOrderedMove(
+    state: MatchState,
+    from: Square,
+    to: Square,
+    nowMs: number
+  ): { committed: boolean; reason: 'ok' | 'timeout' | 'illegal'; next: MatchState } {
+    const mover = (state.fen.split(' ')[1] as 'w' | 'b') ?? 'w';
+
+    // Step 1: Verify clock BEFORE applying move to board
+    const preCheck = checkClockBeforeMove(state.clock, mover, nowMs);
+    if (!preCheck.allowed) {
+      return {
+        committed: false,
+        reason: 'timeout',
+        next: {
+          ...state,
+          clock: preCheck.nextState,
+          timedOutBy: preCheck.expiredColor,
+        },
+      };
+    }
+
+    // Step 2: Validate and apply chess rules BEFORE committing clock/increment
+    const moveRes = applyRuleMove({
+      initialFen: state.initialFen,
+      moves: state.moves,
+      from,
+      to,
+      allowCastling: true,
+    });
+    if (!moveRes) {
+      return { committed: false, reason: 'illegal', next: state };
+    }
+
+    // Step 3: Append move record and evaluate termination
+    const nextMoves: MoveRecord[] = [
+      ...state.moves,
+      {
+        ply: state.moves.length + 1,
+        moveNumber: moveRes.moveNumber,
+        color: moveRes.color,
+        san: moveRes.san,
+        uci: moveRes.uci,
+        from: moveRes.from,
+        to: moveRes.to,
+        piece: moveRes.piece,
+        captured: moveRes.captured,
+        promotion: moveRes.promotion,
+        fenBefore: moveRes.fenBefore,
+        fenAfter: moveRes.fenAfter,
+      },
+    ];
+    const term = evaluateGameTermination({
+      fen: moveRes.fenAfter,
+      initialFen: state.initialFen,
+      moves: nextMoves,
+      allowCastling: true,
+    });
+
+    // Step 4: Commit clock ONLY after valid board state is produced
+    const nextTurn: 'w' | 'b' = moveRes.color === 'w' ? 'b' : 'w';
+    const clockCommit = commitMoveClock(
+      state.clock,
+      moveRes.color,
+      nextTurn,
+      state.incrementSec,
+      nowMs,
+      term.isOver
+    );
+
+    return {
+      committed: true,
+      reason: 'ok',
+      next: {
+        ...state,
+        fen: moveRes.fenAfter,
+        moves: nextMoves,
+        clock: clockCommit.nextState,
+      },
+    };
+  }
+
+  const t0 = 30_000_000;
+  let match: MatchState = {
+    initialFen: START_FEN,
+    fen: START_FEN,
+    moves: [],
+    clock: createClockState(10, 'w', t0),
+    incrementSec: 3,
+    timedOutBy: null,
+  };
+
+  // Case 1: Illegal move (e2->e5) attempted with time left MUST NOT alter board, switch turns, or award increment
+  const illegalAttempt = attemptOrderedMove(match, 'e2', 'e5', t0 + 1000);
+  assert.equal(illegalAttempt.committed, false);
+  assert.equal(illegalAttempt.reason, 'illegal');
+  assert.equal(illegalAttempt.next.moves.length, 0);
+  assert.equal(illegalAttempt.next.fen, START_FEN);
+  assert.equal(illegalAttempt.next.clock.activeTurn, 'w');
+  assert.equal(illegalAttempt.next.clock.w, 10);
+  assert.equal(illegalAttempt.next.clock.turnStartedAtMs, t0);
+
+  // Case 2: Fool's Mate — Black plays Qh4# with 100ms remaining -> Checkmate commits and freezes clock (NOT timeout)
+  match = attemptOrderedMove(match, 'f2', 'f3', t0 + 1000).next; // W: 10-1+3 = 12, B starts at t0+1000
+  match = attemptOrderedMove(match, 'e7', 'e5', t0 + 2000).next; // B: 10-1+3 = 12, W starts at t0+2000
+  match = attemptOrderedMove(match, 'g2', 'g4', t0 + 3000).next; // W: 12-1+3 = 14, B starts at t0+3000
+  const mateAttempt = attemptOrderedMove(match, 'd8', 'h4', t0 + 3000 + 11_900); // B has 100ms left!
+  assert.equal(mateAttempt.committed, true);
+  assert.equal(mateAttempt.reason, 'ok');
+  assert.equal(mateAttempt.next.moves.length, 4);
+  assert.equal(mateAttempt.next.moves[3].san, 'Qh4#');
+  assert.equal(mateAttempt.next.clock.turnStartedAtMs, null);
+  assert.equal(mateAttempt.next.timedOutBy, null);
+  const mateTerm = evaluateGameTermination({
+    fen: mateAttempt.next.fen,
+    initialFen: START_FEN,
+    moves: mateAttempt.next.moves,
+    allowCastling: true,
+  });
+  assert.equal(mateTerm.isOver, true);
+  assert.equal(mateTerm.winner, 'b');
+  assert.equal(mateTerm.reason, 'Checkmate');
+
+  // Case 3: Legal move attempted AFTER clock expired MUST be rejected BEFORE modifying board/history and award NO increment
+  const expiredMatch: MatchState = {
+    initialFen: START_FEN,
+    fen: START_FEN,
+    moves: [],
+    clock: createClockState(5, 'w', t0),
+    incrementSec: 10,
+    timedOutBy: null,
+  };
+  const lateMove = attemptOrderedMove(expiredMatch, 'e2', 'e4', t0 + 5150);
+  assert.equal(lateMove.committed, false);
+  assert.equal(lateMove.reason, 'timeout');
+  assert.equal(lateMove.next.moves.length, 0);
+  assert.equal(lateMove.next.fen, START_FEN);
+  assert.equal(lateMove.next.clock.w, 0);
+  assert.equal(lateMove.next.clock.b, 5);
+  assert.equal(lateMove.next.clock.turnStartedAtMs, null);
+  assert.equal(lateMove.next.timedOutBy, 'w');
+  const timeoutTerm = evaluateGameTermination({
+    fen: lateMove.next.fen,
+    timeoutLoser: lateMove.next.timedOutBy,
+  });
+  assert.equal(timeoutTerm.isOver, true);
+  assert.equal(timeoutTerm.winner, 'b');
+  assert.equal(timeoutTerm.reason, 'Black won on time');
 });

@@ -679,15 +679,55 @@ export const SEEDED_MATCHES: SavedMatch[] = [
 export const PREFERENCES_STORAGE_KEY = 'crownline_preferences_v1';
 export const PROFILE_STORAGE_KEY = 'crownline_profile_v1';
 export const MATCHES_STORAGE_KEY = 'crownline_matches_v1';
+export const MAX_AVATAR_DATA_URL_LENGTH = 512_000;
+export const MAX_SAVED_MATCHES = 25;
 
 const PREFS_KEY = PREFERENCES_STORAGE_KEY;
 const PROFILE_KEY = PROFILE_STORAGE_KEY;
 const MATCHES_KEY = MATCHES_STORAGE_KEY;
 
+export type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+export type StorageLoadStatus = 'ok' | 'missing' | 'corrupted' | 'unavailable';
+export type StorageWriteError = 'unavailable' | 'quota_exceeded' | 'serialization' | 'empty_blocked';
+
+export interface StorageLoadResult<T> {
+  data: T;
+  status: StorageLoadStatus;
+  migrated: boolean;
+}
+
+export interface StorageWriteResult {
+  ok: boolean;
+  error?: StorageWriteError;
+}
+
 const VALID_APP_THEMES = new Set<string>(APP_THEMES.map((t) => t.id));
 const VALID_LANGUAGES = new Set<AppLanguage>(['en', 'vi', 'zh-TW', 'ja']);
 const VALID_RESULTS = new Set<SavedMatch['result']>(['1-0', '0-1', '1/2-1/2', '*']);
 const VALID_USER_SIDES = new Set<'w' | 'b' | 'both'>(['w', 'b', 'both']);
+
+const LEGACY_LANGUAGE_MAP: Record<string, AppLanguage> = {
+  vn: 'vi',
+  'vi-VN': 'vi',
+  'en-US': 'en',
+  'en-GB': 'en',
+  tw: 'zh-TW',
+  'zh-Hant': 'zh-TW',
+  jp: 'ja',
+  'ja-JP': 'ja',
+};
+
+const LEGACY_ANIMATION_LEVEL_MAP: Record<string, AnimationLevelId> = {
+  none: 'off',
+  disabled: 'off',
+  minimal: 'subtle',
+  normal: 'smooth',
+  default: 'smooth',
+  high: 'expressive',
+  full: 'expressive',
+};
+
+const SAFE_AVATAR_DATA_URL_RE = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -712,93 +752,212 @@ function readNullableNumber(value: unknown, min: number, max: number): number | 
   return Math.min(max, Math.max(min, value));
 }
 
+/**
+ * Validates that an avatar data URL is a safe raster image (PNG/JPEG/WebP/GIF)
+ * within the LocalStorage-friendly size budget (blocking SVG XSS and multi-MB bloat).
+ */
+export function isValidAvatarDataUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  if (value.length === 0 || value.length > MAX_AVATAR_DATA_URL_LENGTH) return false;
+  return SAFE_AVATAR_DATA_URL_RE.test(value);
+}
+
+/**
+ * Safely retrieves window.localStorage without throwing SecurityError in
+ * sandboxed iframes, private browsing, or SSR contexts.
+ */
+export function getSafeLocalStorage(): StorageLike | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const storage = window.localStorage;
+    if (!storage) return null;
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function isQuotaExceededError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const candidate = err as { name?: string; code?: number };
+  return (
+    candidate.name === 'QuotaExceededError' ||
+    candidate.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+    candidate.code === 22 ||
+    candidate.code === 1014
+  );
+}
+
+function resolveStorage(explicit?: StorageLike | null): StorageLike | null {
+  if (explicit !== undefined) return explicit;
+  return getSafeLocalStorage();
+}
+
+/**
+ * Best-effort preservation of unreadable/corrupted raw JSON under `<key>_corrupt_backup`
+ * before an explicit user save replaces the primary key. Never deletes or modifies other keys.
+ */
+function preserveCorruptRawBeforeOverwrite(
+  storage: StorageLike,
+  key: string,
+  existingRaw: string | null
+): void {
+  if (!existingRaw) return;
+  try {
+    JSON.parse(existingRaw);
+    // Existing payload is valid JSON — no backup needed.
+    return;
+  } catch {
+    try {
+      const backupKey = `${key}_corrupt_backup`;
+      if (!storage.getItem(backupKey)) {
+        storage.setItem(backupKey, existingRaw);
+      }
+    } catch {
+      // Ignore backup failures (e.g. storage full or restricted) — never block or destroy other keys.
+    }
+  }
+}
+
+function safeWriteItem(storage: StorageLike | null, key: string, payload: unknown): StorageWriteResult {
+  if (!storage) {
+    return { ok: false, error: 'unavailable' };
+  }
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(payload);
+  } catch {
+    return { ok: false, error: 'serialization' };
+  }
+
+  let existingRaw: string | null = null;
+  try {
+    existingRaw = storage.getItem(key);
+    // Skip redundant synchronous disk write when stored JSON is byte-identical
+    if (existingRaw === serialized) {
+      return { ok: true };
+    }
+  } catch {
+    // Proceed to write attempt if getItem throws (e.g. restricted storage)
+  }
+
+  preserveCorruptRawBeforeOverwrite(storage, key, existingRaw);
+
+  try {
+    storage.setItem(key, serialized);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: isQuotaExceededError(err) ? 'quota_exceeded' : 'unavailable',
+    };
+  }
+}
+
+function unwrapPayloadEnvelope(raw: unknown): { payload: unknown; migrated: boolean } {
+  if (isRecord(raw) && isRecord(raw.data) && !('appTheme' in raw) && !('displayName' in raw)) {
+    return { payload: raw.data, migrated: true };
+  }
+  return { payload: raw, migrated: false };
+}
+
 export function sanitizePreferences(raw: unknown): AppPreferences {
-  if (!isRecord(raw)) return { ...DEFAULT_PREFERENCES };
+  const { payload } = unwrapPayloadEnvelope(raw);
+  if (!isRecord(payload)) return { ...DEFAULT_PREFERENCES };
 
   const appTheme: AppThemeId =
-    typeof raw.appTheme === 'string' && VALID_APP_THEMES.has(raw.appTheme)
-      ? (raw.appTheme as AppThemeId)
+    typeof payload.appTheme === 'string' && VALID_APP_THEMES.has(payload.appTheme)
+      ? (payload.appTheme as AppThemeId)
       : DEFAULT_PREFERENCES.appTheme;
 
   const boardTheme: BoardThemeId =
-    typeof raw.boardTheme === 'string' && Object.prototype.hasOwnProperty.call(BOARD_THEMES, raw.boardTheme)
-      ? (raw.boardTheme as BoardThemeId)
+    typeof payload.boardTheme === 'string' && Object.prototype.hasOwnProperty.call(BOARD_THEMES, payload.boardTheme)
+      ? (payload.boardTheme as BoardThemeId)
       : DEFAULT_PREFERENCES.boardTheme;
 
   const pieceStyle: PieceStyleId =
-    typeof raw.pieceStyle === 'string' && Object.prototype.hasOwnProperty.call(PIECE_STYLES, raw.pieceStyle)
-      ? (raw.pieceStyle as PieceStyleId)
+    typeof payload.pieceStyle === 'string' && Object.prototype.hasOwnProperty.call(PIECE_STYLES, payload.pieceStyle)
+      ? (payload.pieceStyle as PieceStyleId)
       : DEFAULT_PREFERENCES.pieceStyle;
 
-  const language: AppLanguage =
-    typeof raw.language === 'string' && VALID_LANGUAGES.has(raw.language as AppLanguage)
-      ? (raw.language as AppLanguage)
-      : DEFAULT_PREFERENCES.language;
+  let language: AppLanguage = DEFAULT_PREFERENCES.language;
+  if (typeof payload.language === 'string') {
+    if (VALID_LANGUAGES.has(payload.language as AppLanguage)) {
+      language = payload.language as AppLanguage;
+    } else if (Object.prototype.hasOwnProperty.call(LEGACY_LANGUAGE_MAP, payload.language)) {
+      language = LEGACY_LANGUAGE_MAP[payload.language];
+    }
+  }
 
-  const animationLevel: AnimationLevelId =
-    typeof raw.animationLevel === 'string' &&
-    Object.prototype.hasOwnProperty.call(ANIMATION_PRESET_DEFAULTS, raw.animationLevel)
-      ? (raw.animationLevel as AnimationLevelId)
-      : DEFAULT_PREFERENCES.animationLevel;
+  let animationLevel: AnimationLevelId = DEFAULT_PREFERENCES.animationLevel;
+  if (typeof payload.animationLevel === 'string') {
+    if (Object.prototype.hasOwnProperty.call(ANIMATION_PRESET_DEFAULTS, payload.animationLevel)) {
+      animationLevel = payload.animationLevel as AnimationLevelId;
+    } else if (Object.prototype.hasOwnProperty.call(LEGACY_ANIMATION_LEVEL_MAP, payload.animationLevel)) {
+      animationLevel = LEGACY_ANIMATION_LEVEL_MAP[payload.animationLevel];
+    }
+  }
 
   const animationEasing: AnimationEasingId =
-    typeof raw.animationEasing === 'string' &&
-    Object.prototype.hasOwnProperty.call(ANIMATION_EASING_CURVES, raw.animationEasing)
-      ? (raw.animationEasing as AnimationEasingId)
+    typeof payload.animationEasing === 'string' &&
+    Object.prototype.hasOwnProperty.call(ANIMATION_EASING_CURVES, payload.animationEasing)
+      ? (payload.animationEasing as AnimationEasingId)
       : DEFAULT_PREFERENCES.animationEasing;
 
   return {
     appTheme,
-    appIcon: resolveAppIconId(typeof raw.appIcon === 'string' ? raw.appIcon : undefined),
+    appIcon: resolveAppIconId(typeof payload.appIcon === 'string' ? payload.appIcon : undefined),
     boardTheme,
     pieceStyle,
     language,
     animationLevel,
     pieceSpeedMs:
-      typeof raw.pieceSpeedMs === 'number'
-        ? clampPieceSpeedMs(raw.pieceSpeedMs)
+      typeof payload.pieceSpeedMs === 'number'
+        ? clampPieceSpeedMs(payload.pieceSpeedMs)
         : DEFAULT_PREFERENCES.pieceSpeedMs,
     uiSpeedMultiplier:
-      typeof raw.uiSpeedMultiplier === 'number'
-        ? clampUiSpeedMultiplier(raw.uiSpeedMultiplier)
+      typeof payload.uiSpeedMultiplier === 'number'
+        ? clampUiSpeedMultiplier(payload.uiSpeedMultiplier)
         : DEFAULT_PREFERENCES.uiSpeedMultiplier,
     animationEasing,
-    pieceLiftEffect: readBool(raw.pieceLiftEffect, DEFAULT_PREFERENCES.pieceLiftEffect),
-    pieceMoveAnimation: readBool(raw.pieceMoveAnimation, DEFAULT_PREFERENCES.pieceMoveAnimation),
-    badgePopAnimation: readBool(raw.badgePopAnimation, DEFAULT_PREFERENCES.badgePopAnimation),
+    pieceLiftEffect: readBool(payload.pieceLiftEffect, DEFAULT_PREFERENCES.pieceLiftEffect),
+    pieceMoveAnimation: readBool(payload.pieceMoveAnimation, DEFAULT_PREFERENCES.pieceMoveAnimation),
+    badgePopAnimation: readBool(payload.badgePopAnimation, DEFAULT_PREFERENCES.badgePopAnimation),
     boardHighlightsAnimation: readBool(
-      raw.boardHighlightsAnimation,
+      payload.boardHighlightsAnimation,
       DEFAULT_PREFERENCES.boardHighlightsAnimation
     ),
-    evalBarAnimation: readBool(raw.evalBarAnimation, DEFAULT_PREFERENCES.evalBarAnimation),
-    uiTransitions: readBool(raw.uiTransitions, DEFAULT_PREFERENCES.uiTransitions),
-    showCoordinates: readBool(raw.showCoordinates, DEFAULT_PREFERENCES.showCoordinates),
-    showLegalMoves: readBool(raw.showLegalMoves, DEFAULT_PREFERENCES.showLegalMoves),
-    showEvalBar: readBool(raw.showEvalBar, DEFAULT_PREFERENCES.showEvalBar),
+    evalBarAnimation: readBool(payload.evalBarAnimation, DEFAULT_PREFERENCES.evalBarAnimation),
+    uiTransitions: readBool(payload.uiTransitions, DEFAULT_PREFERENCES.uiTransitions),
+    showCoordinates: readBool(payload.showCoordinates, DEFAULT_PREFERENCES.showCoordinates),
+    showLegalMoves: readBool(payload.showLegalMoves, DEFAULT_PREFERENCES.showLegalMoves),
+    showEvalBar: readBool(payload.showEvalBar, DEFAULT_PREFERENCES.showEvalBar),
     showMaterialDifference: readBool(
-      raw.showMaterialDifference,
+      payload.showMaterialDifference,
       DEFAULT_PREFERENCES.showMaterialDifference
     ),
-    muted: readBool(raw.muted, DEFAULT_PREFERENCES.muted),
-    analysisDepth: clampInt(raw.analysisDepth, 8, 22, DEFAULT_PREFERENCES.analysisDepth),
-    multiPv: clampInt(raw.multiPv, 1, 3, DEFAULT_PREFERENCES.multiPv),
+    muted: readBool(payload.muted, DEFAULT_PREFERENCES.muted),
+    analysisDepth: clampInt(payload.analysisDepth, 8, 22, DEFAULT_PREFERENCES.analysisDepth),
+    multiPv: clampInt(payload.multiPv, 1, 3, DEFAULT_PREFERENCES.multiPv),
   };
 }
 
 export function sanitizeProfile(raw: unknown): UserProfile {
-  if (!isRecord(raw)) return { ...DEFAULT_PROFILE };
+  const { payload } = unwrapPayloadEnvelope(raw);
+  if (!isRecord(payload)) return { ...DEFAULT_PROFILE };
 
-  const displayName = readString(raw.displayName, DEFAULT_PROFILE.displayName, 40).trim();
-  const title = readString(raw.title, DEFAULT_PROFILE.title, 32).trim();
+  // Backward-compatible fallback for legacy field aliases (`name` -> `displayName`, `avatar` -> `avatarImage`)
+  const rawName = payload.displayName !== undefined ? payload.displayName : payload.name;
+  const rawAvatar = payload.avatarImage !== undefined ? payload.avatarImage : payload.avatar;
+
+  const displayName = readString(rawName, DEFAULT_PROFILE.displayName, 40).trim();
+  const title = readString(payload.title, DEFAULT_PROFILE.title, 32).trim();
   const avatarColor =
-    typeof raw.avatarColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(raw.avatarColor)
-      ? raw.avatarColor
+    typeof payload.avatarColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(payload.avatarColor)
+      ? payload.avatarColor
       : DEFAULT_PROFILE.avatarColor;
-  const avatarImage =
-    typeof raw.avatarImage === 'string' && raw.avatarImage.startsWith('data:image/')
-      ? raw.avatarImage
-      : null;
-  const bio = readString(raw.bio, DEFAULT_PROFILE.bio, 240);
+  const avatarImage = isValidAvatarDataUrl(rawAvatar) ? rawAvatar : null;
+  const bio = readString(payload.bio, DEFAULT_PROFILE.bio, 240);
 
   return {
     displayName: displayName || DEFAULT_PROFILE.displayName,
@@ -809,15 +968,33 @@ export function sanitizeProfile(raw: unknown): UserProfile {
   };
 }
 
-export function sanitizeSavedMatches(raw: unknown): SavedMatch[] {
-  if (!Array.isArray(raw)) return SEEDED_MATCHES;
+function extractMatchArray(raw: unknown): unknown[] | null {
+  if (Array.isArray(raw)) return raw;
+  if (isRecord(raw)) {
+    if (Array.isArray(raw.matches)) return raw.matches;
+    if (Array.isArray(raw.data)) return raw.data;
+  }
+  return null;
+}
+
+function extractValidSavedMatches(raw: unknown): SavedMatch[] | null {
+  const list = extractMatchArray(raw);
+  if (!list) return null;
 
   const valid: SavedMatch[] = [];
-  for (const item of raw) {
+  const seenIds = new Set<string>();
+
+  for (let idx = 0; idx < list.length; idx++) {
+    const item = list[idx];
     if (!isRecord(item)) continue;
-    const id = readString(item.id, '', 80).trim();
+    const rawId = readString(item.id, '', 80).trim();
     const pgn = readString(item.pgn, '', 20000).trim();
-    if (!id || !pgn) continue;
+    if (!pgn) continue;
+
+    // Preserve legacy records with valid PGN even if id was absent, while deduplicating IDs
+    const id = rawId || `legacy-match-${idx + 1}`;
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
 
     const result: SavedMatch['result'] =
       typeof item.result === 'string' && VALID_RESULTS.has(item.result as SavedMatch['result'])
@@ -828,6 +1005,9 @@ export function sanitizeSavedMatches(raw: unknown): SavedMatch[] {
       typeof item.userSide === 'string' && VALID_USER_SIDES.has(item.userSide as 'w' | 'b' | 'both')
         ? (item.userSide as 'w' | 'b' | 'both')
         : undefined;
+
+    const rawWhiteElo = item.whiteGameElo !== undefined ? item.whiteGameElo : item.whiteElo;
+    const rawBlackElo = item.blackGameElo !== undefined ? item.blackGameElo : item.blackElo;
 
     valid.push({
       id,
@@ -841,86 +1021,136 @@ export function sanitizeSavedMatches(raw: unknown): SavedMatch[] {
       pgn,
       whiteAccuracy: readNullableNumber(item.whiteAccuracy, 0, 100),
       blackAccuracy: readNullableNumber(item.blackAccuracy, 0, 100),
-      whiteGameElo: readNullableNumber(item.whiteGameElo, 400, 2900),
-      blackGameElo: readNullableNumber(item.blackGameElo, 400, 2900),
+      whiteGameElo: readNullableNumber(rawWhiteElo, 400, 2900),
+      blackGameElo: readNullableNumber(rawBlackElo, 400, 2900),
       userSide,
     });
-    if (valid.length >= 25) break;
+    if (valid.length >= MAX_SAVED_MATCHES) break;
   }
 
-  return valid.length > 0 ? valid : SEEDED_MATCHES;
+  return valid;
 }
 
-export function loadPreferences(): AppPreferences {
-  if (typeof window === 'undefined') return DEFAULT_PREFERENCES;
+export function sanitizeSavedMatches(raw: unknown): SavedMatch[] {
+  const valid = extractValidSavedMatches(raw);
+  return valid && valid.length > 0 ? valid : SEEDED_MATCHES.map((m) => ({ ...m }));
+}
+
+export function loadPreferencesWithStatus(storage?: StorageLike | null): StorageLoadResult<AppPreferences> {
+  const store = resolveStorage(storage);
+  if (!store) {
+    return { data: { ...DEFAULT_PREFERENCES }, status: 'unavailable', migrated: false };
+  }
   try {
-    const raw = window.localStorage.getItem(PREFS_KEY);
-    if (!raw) return DEFAULT_PREFERENCES;
-    return sanitizePreferences(JSON.parse(raw));
+    const raw = store.getItem(PREFS_KEY);
+    if (raw === null) {
+      return { data: { ...DEFAULT_PREFERENCES }, status: 'missing', migrated: false };
+    }
+    const parsed: unknown = JSON.parse(raw);
+    const { payload, migrated } = unwrapPayloadEnvelope(parsed);
+    if (!isRecord(payload)) {
+      return { data: { ...DEFAULT_PREFERENCES }, status: 'corrupted', migrated: false };
+    }
+    return { data: sanitizePreferences(parsed), status: 'ok', migrated };
   } catch {
-    return DEFAULT_PREFERENCES;
+    return { data: { ...DEFAULT_PREFERENCES }, status: 'corrupted', migrated: false };
   }
 }
 
-export function savePreferences(prefs: AppPreferences): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-  } catch {
-    // Ignore storage quota errors
-  }
+export function loadPreferences(storage?: StorageLike | null): AppPreferences {
+  return loadPreferencesWithStatus(storage).data;
+}
+
+export function savePreferences(prefs: AppPreferences, storage?: StorageLike | null): StorageWriteResult {
+  const store = resolveStorage(storage);
+  const sanitized = sanitizePreferences(prefs);
+  return safeWriteItem(store, PREFS_KEY, sanitized);
 }
 
 /**
  * Resets ONLY stored app preferences while preserving user profile and saved match history.
  */
-export function resetStoredPreferences(
-  storage: Pick<Storage, 'removeItem'> | null = typeof window !== 'undefined' ? window.localStorage : null
-): void {
-  if (!storage) return;
+export function resetStoredPreferences(storage?: Pick<Storage, 'removeItem'> | null): void {
+  const store = storage !== undefined ? storage : getSafeLocalStorage();
+  if (!store) return;
   try {
-    storage.removeItem(PREFERENCES_STORAGE_KEY);
+    store.removeItem(PREFERENCES_STORAGE_KEY);
   } catch {
     // Ignore storage access failures
   }
 }
 
-export function loadProfile(): UserProfile {
-  if (typeof window === 'undefined') return DEFAULT_PROFILE;
+export function loadProfileWithStatus(storage?: StorageLike | null): StorageLoadResult<UserProfile> {
+  const store = resolveStorage(storage);
+  if (!store) {
+    return { data: { ...DEFAULT_PROFILE }, status: 'unavailable', migrated: false };
+  }
   try {
-    const raw = window.localStorage.getItem(PROFILE_KEY);
-    if (!raw) return DEFAULT_PROFILE;
-    return sanitizeProfile(JSON.parse(raw));
+    const raw = store.getItem(PROFILE_KEY);
+    if (raw === null) {
+      return { data: { ...DEFAULT_PROFILE }, status: 'missing', migrated: false };
+    }
+    const parsed: unknown = JSON.parse(raw);
+    const { payload, migrated } = unwrapPayloadEnvelope(parsed);
+    if (!isRecord(payload)) {
+      return { data: { ...DEFAULT_PROFILE }, status: 'corrupted', migrated: false };
+    }
+    return { data: sanitizeProfile(parsed), status: 'ok', migrated };
   } catch {
-    return DEFAULT_PROFILE;
+    return { data: { ...DEFAULT_PROFILE }, status: 'corrupted', migrated: false };
   }
 }
 
-export function saveProfile(profile: UserProfile): void {
-  if (typeof window === 'undefined') return;
+export function loadProfile(storage?: StorageLike | null): UserProfile {
+  return loadProfileWithStatus(storage).data;
+}
+
+export function saveProfile(profile: UserProfile, storage?: StorageLike | null): StorageWriteResult {
+  const store = resolveStorage(storage);
+  const sanitized = sanitizeProfile(profile);
+  return safeWriteItem(store, PROFILE_KEY, sanitized);
+}
+
+export function loadSavedMatchesWithStatus(storage?: StorageLike | null): StorageLoadResult<SavedMatch[]> {
+  const store = resolveStorage(storage);
+  if (!store) {
+    return { data: SEEDED_MATCHES.map((m) => ({ ...m })), status: 'unavailable', migrated: false };
+  }
   try {
-    window.localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    const raw = store.getItem(MATCHES_KEY);
+    if (raw === null) {
+      return { data: SEEDED_MATCHES.map((m) => ({ ...m })), status: 'missing', migrated: false };
+    }
+    const parsed: unknown = JSON.parse(raw);
+    const list = extractMatchArray(parsed);
+    if (!list) {
+      return { data: SEEDED_MATCHES.map((m) => ({ ...m })), status: 'corrupted', migrated: false };
+    }
+    const migrated = !Array.isArray(parsed);
+    return { data: sanitizeSavedMatches(parsed), status: 'ok', migrated };
   } catch {
-    // Ignore storage quota errors
+    return { data: SEEDED_MATCHES.map((m) => ({ ...m })), status: 'corrupted', migrated: false };
   }
 }
 
-export function loadSavedMatches(): SavedMatch[] {
-  if (typeof window === 'undefined') return SEEDED_MATCHES;
-  try {
-    const raw = window.localStorage.getItem(MATCHES_KEY);
-    if (!raw) return SEEDED_MATCHES;
-    return sanitizeSavedMatches(JSON.parse(raw));
-  } catch {
-    return SEEDED_MATCHES;
-  }
+export function loadSavedMatches(storage?: StorageLike | null): SavedMatch[] {
+  return loadSavedMatchesWithStatus(storage).data;
 }
 
-export function saveMatches(matches: SavedMatch[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(MATCHES_KEY, JSON.stringify(matches.slice(0, 25)));
-  } catch {
-    // Ignore storage quota errors
+/**
+ * Safely persists saved match history.
+ * - Never overwrites valid existing stored match history with an empty array.
+ * - Never deletes/prunes existing stored matches when quota is exceeded (atomic failure leaves prior history intact).
+ */
+export function saveMatches(matches: SavedMatch[], storage?: StorageLike | null): StorageWriteResult {
+  const store = resolveStorage(storage);
+  if (!store) {
+    return { ok: false, error: 'unavailable' };
   }
+  const valid = extractValidSavedMatches(matches);
+  if (!valid || valid.length === 0) {
+    return { ok: false, error: 'empty_blocked' };
+  }
+
+  return safeWriteItem(store, MATCHES_KEY, valid.slice(0, MAX_SAVED_MATCHES));
 }

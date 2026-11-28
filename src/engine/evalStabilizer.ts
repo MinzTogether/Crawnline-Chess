@@ -46,7 +46,7 @@ export const SAME_FEN_BAR_DEADBAND = 1.0;
 /** Maximum number of evaluated positions kept in memory to prevent unbounded growth across long sessions. */
 export const MAX_EVAL_CACHE_SIZE = 500;
 
-function writeCachedEval(
+export function writeCachedEval(
   cache: Map<string, CachedEvalEntry>,
   key: string,
   entry: CachedEvalEntry

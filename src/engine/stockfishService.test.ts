@@ -4,6 +4,8 @@ import {
   bootStockfishWorker,
   StockfishAnalyzer,
   StockfishOpponent,
+  type BootableWorkerEventMap,
+  type BootableWorkerEventType,
   type BootableWorkerLike,
   type StockfishBootCallbacks,
   type StockfishWorkerFactory,
@@ -16,11 +18,23 @@ const AFTER_E5_FEN = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0
 
 const flushAsync = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+type MockEventPayloadMap = {
+  message: Partial<MessageEvent> & { data?: unknown };
+  error: Partial<ErrorEvent> & { message?: string };
+  messageerror: Partial<MessageEvent> & { message?: string };
+};
+
 class MockEventWorker implements BootableWorkerLike {
   readonly url: string;
   readonly sent: string[] = [];
   terminated = false;
-  private listeners = new Map<string, Set<(event: any) => void>>();
+  private listeners: {
+    [K in BootableWorkerEventType]: Set<(event: BootableWorkerEventMap[K]) => void>;
+  } = {
+    message: new Set(),
+    error: new Set(),
+    messageerror: new Set(),
+  };
 
   constructor(url: string) {
     this.url = url;
@@ -34,21 +48,23 @@ class MockEventWorker implements BootableWorkerLike {
     this.terminated = true;
   }
 
-  addEventListener(type: 'message' | 'error' | 'messageerror', listener: (event: any) => void): void {
-    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
-    this.listeners.get(type)!.add(listener);
-  }
-
-  removeEventListener(
-    type: 'message' | 'error' | 'messageerror',
-    listener: (event: any) => void
+  addEventListener<K extends BootableWorkerEventType>(
+    type: K,
+    listener: (event: BootableWorkerEventMap[K]) => void
   ): void {
-    this.listeners.get(type)?.delete(listener);
+    this.listeners[type].add(listener);
   }
 
-  emit(type: 'message' | 'error' | 'messageerror', event: any): void {
-    for (const fn of Array.from(this.listeners.get(type) ?? [])) {
-      fn(event);
+  removeEventListener<K extends BootableWorkerEventType>(
+    type: K,
+    listener: (event: BootableWorkerEventMap[K]) => void
+  ): void {
+    this.listeners[type].delete(listener);
+  }
+
+  emit<K extends BootableWorkerEventType>(type: K, event: MockEventPayloadMap[K]): void {
+    for (const fn of Array.from(this.listeners[type])) {
+      fn(event as BootableWorkerEventMap[K]);
     }
   }
 }
@@ -62,9 +78,14 @@ function createBootedHarness() {
     const worker = new MockEventWorker(`/mock/worker-${bootCount}.js`);
     workers.push(worker);
 
-    const onError = (e: any) => callbacks.onError(new Error(e?.message || 'worker runtime error'));
-    const onMessageError = (e: any) =>
-      callbacks.onError(new Error(e?.message || 'worker messageerror'));
+    const onError = (e: ErrorEvent) => callbacks.onError(new Error(e?.message || 'worker runtime error'));
+    const onMessageError = (e: MessageEvent) => {
+      const msg =
+        typeof e === 'object' && e !== null && 'message' in e
+          ? String((e as { message?: unknown }).message ?? '')
+          : '';
+      callbacks.onError(new Error(msg || 'worker messageerror'));
+    };
 
     worker.addEventListener('message', callbacks.onMessage);
     worker.addEventListener('error', onError);
@@ -644,4 +665,294 @@ test('StockfishAnalyzer.stop() during handleStopTimeout reboot cancels queued jo
 
   analyzer.terminate();
 });
+
+test('StockfishAnalyzer job queue handles rapid multi-burst preemption across syncing/searching without leaking stale callbacks', async () => {
+  const harness = createBootedHarness();
+  const analyzer = new StockfishAnalyzer(harness.factory);
+  const fen3 = 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2';
+  const fen4 = 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3';
+
+  const staleStreamSnapshots: string[] = [];
+  // Burst 1: realtime analysis starts syncing
+  void analyzer.analyzePosition(
+    START_FEN,
+    { depth: 12, multiPv: 1 },
+    (snap) => staleStreamSnapshots.push(snap.fen)
+  );
+  await flushAsync();
+  const worker = harness.latest();
+  assert.equal(analyzer.getQueueState().phase, 'syncing');
+
+  // Burst 2 & 3: two evaluateOnce jobs arrive while still syncing -> job A supersedes stream, job B supersedes job A
+  const jobA = analyzer.evaluateOnce(AFTER_E4_FEN, 10);
+  const jobB = analyzer.evaluateOnce(fen3, 10);
+  // Burst 4: final evaluateOnce arrives -> supersedes job B
+  const jobC = analyzer.evaluateOnce(fen4, 10);
+
+  const [resA, resB] = await Promise.all([jobA, jobB]);
+  assert.equal(resA.status, 'cancelled');
+  assert.equal(resB.status, 'cancelled');
+  assert.equal(staleStreamSnapshots.length, 0);
+
+  // Flush the queued isready/readyok handshakes; only fen4 should ever be searched
+  worker.emit('message', { data: 'readyok' });
+  await flushAsync();
+  if (analyzer.getQueueState().phase === 'syncing') {
+    worker.emit('message', { data: 'readyok' });
+  }
+  assert.equal(analyzer.getQueueState().phase, 'searching');
+  assert.ok(worker.sent.includes(`position fen ${fen4}`));
+  assert.ok(!worker.sent.includes(`position fen ${AFTER_E4_FEN}`));
+  assert.ok(!worker.sent.includes(`position fen ${fen3}`));
+
+  worker.emit('message', {
+    data: 'info depth 10 seldepth 12 multipv 1 score cp 41 nodes 500 nps 5000 pv f1b5',
+  });
+  worker.emit('message', { data: 'bestmove f1b5' });
+
+  const resC = await jobC;
+  assert.equal(resC.status, 'completed');
+  if (resC.status === 'completed') {
+    assert.deepEqual(resC.score, { type: 'cp', value: 41 });
+    assert.equal(resC.bestMove, 'f1b5');
+  }
+  assert.equal(staleStreamSnapshots.length, 0);
+  assert.equal(analyzer.getQueueState().pendingSyncCount, 0);
+  assert.equal(analyzer.getQueueState().phase, 'idle');
+
+  analyzer.terminate();
+});
+
+test('Worker startup timeout after uciok (missing readyok) and synchronous Worker constructor failure both fall back to asm.js', async () => {
+  // Case A: WASM sends uciok but hangs before readyok -> handshake timer expires -> falls back to asm.js
+  const workersA: MockEventWorker[] = [];
+  const resA = await bootStockfishWorker(
+    { onMessage: () => {}, onError: () => {} },
+    {
+      handshakeTimeoutMs: 35,
+      detectWasm: () => true,
+      createWorker: (url) => {
+        const w = new MockEventWorker(url);
+        workersA.push(w);
+        if (url.endsWith('stockfish.wasm.js')) {
+          setTimeout(() => w.emit('message', { data: 'uciok' }), 5);
+          // Never emits readyok -> stage-2 handshake timeout
+        } else {
+          setTimeout(() => {
+            w.emit('message', { data: 'uciok' });
+            w.emit('message', { data: 'readyok' });
+          }, 5);
+        }
+        return w;
+      },
+    }
+  );
+  assert.equal(resA.backend, 'asmjs');
+  assert.equal(workersA.length, 2);
+  assert.equal(workersA[0].terminated, true);
+  assert.ok(workersA[0].sent.includes('isready'));
+  resA.disposeListeners();
+  resA.worker.terminate();
+
+  // Case B: WASM constructor throws synchronously -> falls back to asm.js immediately
+  let attempts = 0;
+  const resB = await bootStockfishWorker(
+    { onMessage: () => {}, onError: () => {} },
+    {
+      handshakeTimeoutMs: 50,
+      detectWasm: () => true,
+      createWorker: (url) => {
+        attempts += 1;
+        if (url.endsWith('stockfish.wasm.js')) {
+          throw new Error('CSP blocked wasm worker');
+        }
+        const w = new MockEventWorker(url);
+        setTimeout(() => {
+          w.emit('message', { data: 'uciok' });
+          w.emit('message', { data: 'readyok' });
+        }, 5);
+        return w;
+      },
+    }
+  );
+  assert.equal(attempts, 2);
+  assert.equal(resB.backend, 'asmjs');
+  resB.disposeListeners();
+  resB.worker.terminate();
+
+  // Case C: StockfishOpponent startup timeout rejects cleanly and recovers on subsequent call
+  let oppBootAttempt = 0;
+  const opponent = new StockfishOpponent(
+    (callbacks) => {
+      oppBootAttempt += 1;
+      if (oppBootAttempt === 1) {
+        return bootStockfishWorker(callbacks, {
+          handshakeTimeoutMs: 25,
+          detectWasm: () => false,
+          createWorker: (url) => new MockEventWorker(url), // never responds
+        });
+      }
+      return bootStockfishWorker(callbacks, {
+        handshakeTimeoutMs: 100,
+        detectWasm: () => false,
+        createWorker: (url) => {
+          const w = new MockEventWorker(url);
+          setTimeout(() => {
+            w.emit('message', { data: 'uciok' });
+            w.emit('message', { data: 'readyok' });
+          }, 5);
+          const origPost = w.postMessage.bind(w);
+          w.postMessage = (cmd: string) => {
+            origPost(cmd);
+            if (cmd.startsWith('go ')) {
+              setTimeout(() => w.emit('message', { data: 'bestmove e7e5' }), 5);
+            }
+          };
+          return w;
+        },
+      });
+    },
+    { handshakeTimeoutMs: 25 }
+  );
+
+  await assert.rejects(
+    () => opponent.computeMove(AFTER_E4_FEN, STOCKFISH_LEVELS[2]),
+    /timed out/i
+  );
+  assert.equal(opponent.isRunning(), false);
+
+  const recoveredMove = await opponent.computeMove(AFTER_E4_FEN, STOCKFISH_LEVELS[2]);
+  assert.equal(recoveredMove, 'e7e5');
+  assert.equal(opponent.isRunning(), true);
+  opponent.terminate();
+});
+
+test('Worker runtime failure via synchronous postMessage throw fails active job without fake eval and auto-reboots cleanly', async () => {
+  let bootIndex = 0;
+  const createdWorkers: MockEventWorker[] = [];
+
+  const factory: StockfishWorkerFactory = async (callbacks) => {
+    bootIndex += 1;
+    const worker = new MockEventWorker(`/mock/post-fail-${bootIndex}.js`);
+    createdWorkers.push(worker);
+    if (bootIndex === 1) {
+      const origPost = worker.postMessage.bind(worker);
+      worker.postMessage = (cmd: string) => {
+        origPost(cmd);
+        if (cmd.startsWith('go ')) {
+          throw new Error('DataCloneError: worker port detached');
+        }
+      };
+    }
+    worker.addEventListener('message', callbacks.onMessage);
+    return {
+      worker,
+      backend: 'wasm',
+      disposeListeners: () => worker.removeEventListener('message', callbacks.onMessage),
+    };
+  };
+
+  // 1) StockfishAnalyzer recovers cleanly after postMessage throws during search
+  const analyzer = new StockfishAnalyzer(factory);
+  const failedEvalPromise = analyzer.evaluateOnce(START_FEN, 10);
+  await flushAsync();
+  createdWorkers[0].emit('message', { data: 'readyok' });
+
+  const failedRes = await failedEvalPromise;
+  assert.equal(failedRes.status, 'error');
+  assert.equal(failedRes.score, null);
+  assert.equal(createdWorkers[0].terminated, true);
+  assert.equal(analyzer.isRunning(), false);
+
+  // Next request automatically boots worker #2 and returns a real score
+  const recoveredPromise = analyzer.evaluateOnce(AFTER_E4_FEN, 10);
+  await flushAsync();
+  createdWorkers[1].emit('message', { data: 'readyok' });
+  createdWorkers[1].emit('message', {
+    data: 'info depth 10 seldepth 11 multipv 1 score cp 28 nodes 400 nps 4000 pv e7e5',
+  });
+  createdWorkers[1].emit('message', { data: 'bestmove e7e5' });
+
+  const recoveredRes = await recoveredPromise;
+  assert.equal(recoveredRes.status, 'completed');
+  if (recoveredRes.status === 'completed') {
+    assert.deepEqual(recoveredRes.score, { type: 'cp', value: -28 });
+  }
+  analyzer.terminate();
+
+  // 2) StockfishAnalyzer.analyzePosition notifies onError on runtime fault and recovers on next call
+  const streamErrors: string[] = [];
+  const streamSnapshots: number[] = [];
+  const streamHarness = createBootedHarness();
+  const streamAnalyzer = new StockfishAnalyzer(streamHarness.factory);
+
+  await streamAnalyzer.analyzePosition(
+    START_FEN,
+    { depth: 12, multiPv: 1 },
+    (snap) => streamSnapshots.push(snap.depth),
+    (err) => streamErrors.push(err.message)
+  );
+  const w1 = streamHarness.latest();
+  w1.emit('message', { data: 'readyok' });
+  w1.emit('error', { message: 'Out of WebAssembly memory' });
+
+  assert.equal(streamErrors.length, 1);
+  assert.match(streamErrors[0], /Out of WebAssembly memory/);
+  assert.equal(w1.terminated, true);
+  assert.equal(streamAnalyzer.isRunning(), false);
+
+  // Next analyzePosition auto-reboots cleanly and delivers live snapshots
+  await streamAnalyzer.analyzePosition(
+    AFTER_E4_FEN,
+    { depth: 12, multiPv: 1 },
+    (snap) => streamSnapshots.push(snap.depth),
+    (err) => streamErrors.push(err.message)
+  );
+  const w2 = streamHarness.latest();
+  assert.notEqual(w2, w1);
+  w2.emit('message', { data: 'readyok' });
+  w2.emit('message', {
+    data: 'info depth 12 seldepth 14 multipv 1 score cp 15 nodes 900 nps 9000 pv e7e5',
+  });
+  w2.emit('message', { data: 'bestmove e7e5' });
+  assert.ok(streamSnapshots.includes(12));
+  streamAnalyzer.terminate();
+});
+
+test('StockfishAnalyzer computes pvSan lazily on throttled stream emits with identical SAN accuracy', async () => {
+  const harness = createBootedHarness();
+  const analyzer = new StockfishAnalyzer(harness.factory);
+  const snapshots: Array<{ depth: number; pvSan: string[] }> = [];
+
+  await analyzer.analyzePosition(
+    START_FEN,
+    { depth: 12, multiPv: 1 },
+    (snap) => {
+      snapshots.push({ depth: snap.depth, pvSan: snap.lines[0]?.pvSan ?? [] });
+    }
+  );
+  const w = harness.latest();
+  w.emit('message', { data: 'readyok' });
+
+  // Emit several rapid info lines inside the throttle window; only the emitted snapshot needs SAN conversion
+  w.emit('message', {
+    data: 'info depth 8 seldepth 10 multipv 1 score cp 20 nodes 200 nps 4000 pv e2e4 e7e5 g1f3',
+  });
+  w.emit('message', {
+    data: 'info depth 10 seldepth 12 multipv 1 score cp 25 nodes 400 nps 6000 pv e2e4 e7e5 g1f3 b8c6',
+  });
+  w.emit('message', {
+    data: 'info depth 12 seldepth 15 multipv 1 score cp 30 nodes 800 nps 8000 pv d2d4 d7d5 c2c4',
+  });
+  w.emit('message', { data: 'bestmove d2d4' });
+
+  const finalSnap = snapshots[snapshots.length - 1];
+  assert.ok(finalSnap);
+  assert.equal(finalSnap.depth, 12);
+  assert.deepEqual(finalSnap.pvSan, ['d4', 'd5', 'c4']);
+
+  analyzer.terminate();
+});
+
+
 

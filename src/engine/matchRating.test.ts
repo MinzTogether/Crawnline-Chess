@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { MoveRecord } from '../types/chess';
+import type { MoveClassification, MoveRecord } from '../types/chess';
 import { accuracyToGrade, buildMatchRatingReport, estimateGameElo } from './matchRating';
 
 test('estimateGameElo and accuracyToGrade scale monotonically with accuracy and blunders', () => {
@@ -206,7 +206,7 @@ test('buildMatchRatingReport maintains consistency across accuracy, move count, 
     {
       ...makeMove(1, 'w', 'e4', Number.NaN),
       evalAfter: { type: 'cp', value: Number.NaN },
-      classification: 'unknown_bad' as any,
+      classification: 'unknown_bad' as unknown as MoveClassification,
     },
     {
       ...makeMove(2, 'b', 'e5', Number.POSITIVE_INFINITY),

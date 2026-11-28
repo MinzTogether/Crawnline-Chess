@@ -553,11 +553,14 @@ function getFaviconPieceMarkup(piece: PieceSymbol, fill: string, stroke: string)
   }
 }
 
+let lastSyncedFaviconId: AppIconId | null = null;
+
 /**
  * Dynamically updates the browser tab SVG favicon to match the active Frosted White/Black Jade App Icon.
  */
 export function syncBrowserFavicon(iconId: AppIconId): void {
   if (typeof document === 'undefined') return;
+  if (lastSyncedFaviconId === iconId) return;
   const meta = getAppIconMeta(iconId);
   const isWhite = meta.tone === 'white';
 
@@ -578,4 +581,5 @@ export function syncBrowserFavicon(iconId: AppIconId): void {
     document.head.appendChild(link);
   }
   link.href = svg;
+  lastSyncedFaviconId = iconId;
 }

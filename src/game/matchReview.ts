@@ -1,6 +1,7 @@
 import { Chess } from 'chess.js';
 import type { EvalScore, MoveRecord } from '../types/chess';
 import type { EvaluateOnceResult } from '../engine/stockfishService';
+import { positionKeyFromFen } from '../engine/evalStabilizer';
 import { classifyMove } from '../engine/uciParser';
 import { isTacticalPieceSacrifice } from './chessLogic';
 import { detectOpening } from './openings';
@@ -80,14 +81,19 @@ export async function executeMatchReviewPass({
     return { completed: false, cancelled: true, error: null, reviewedMoves: reviewed };
   }
 
+  // Per-pass cache deduplicates identical repeated/transposed positions within this review pass
+  // without ever reusing stale evaluations across separate passes.
+  const passEvalCache = new Map<string, { score: EvalScore; bestMove: string | null }>();
+
   let prevEval: { score: EvalScore; bestMove: string | null };
+  const initialEvalFen = initialEngineFen ?? initialFen;
   const initialTerminal = getTerminalScoreIfGameOver(initialFen);
   if (initialTerminal) {
     prevEval = initialTerminal;
   } else {
     let initialRes: SinglePositionEvaluation;
     try {
-      initialRes = await evaluatePosition(initialFen, depth, initialEngineFen ?? initialFen);
+      initialRes = await evaluatePosition(initialFen, depth, initialEvalFen);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Engine evaluation failed';
       return {
@@ -110,6 +116,7 @@ export async function executeMatchReviewPass({
       };
     }
     prevEval = { score: initialRes.score, bestMove: initialRes.bestMove };
+    passEvalCache.set(positionKeyFromFen(initialEvalFen), prevEval);
   }
 
   for (let i = 0; i < reviewed.length; i++) {
@@ -119,11 +126,15 @@ export async function executeMatchReviewPass({
 
     const move = reviewed[i];
     const moveEngineFen = move.engineFenAfter ?? move.fenAfter;
+    const moveCacheKey = positionKeyFromFen(moveEngineFen);
     let afterEval: { score: EvalScore; bestMove: string | null };
     const terminalAfter = getTerminalScoreIfGameOver(move.fenAfter);
+    const cachedAfter = terminalAfter ? null : passEvalCache.get(moveCacheKey) ?? null;
 
     if (terminalAfter) {
       afterEval = terminalAfter;
+    } else if (cachedAfter) {
+      afterEval = cachedAfter;
     } else {
       let afterRes: SinglePositionEvaluation;
       try {
@@ -150,6 +161,7 @@ export async function executeMatchReviewPass({
         };
       }
       afterEval = { score: afterRes.score, bestMove: afterRes.bestMove };
+      passEvalCache.set(moveCacheKey, afterEval);
     }
 
     const isBook =

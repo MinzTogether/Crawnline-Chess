@@ -79,6 +79,8 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
   const theme = BOARD_THEMES[themeId] ?? BOARD_THEMES.tournament;
   const boardRef = useRef<HTMLDivElement>(null);
 
+  const fenPlacement = useMemo(() => fen.split(' ')[0], [fen]);
+
   // Compute percentage delta so the moved piece glides smoothly from its origin square
   const slideDelta = useMemo(() => {
     if (!lastMove) return null;
@@ -98,14 +100,18 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
     return {
       x: `${(fromCol - toCol) * 100 * scaleFactor}%`,
       y: `${(fromRow - toRow) * 100 * scaleFactor}%`,
-      key: `${lastMove.from}-${lastMove.to}-${fen.split(' ')[0]}`,
+      key: `${lastMove.from}-${lastMove.to}-${fenPlacement}`,
     };
-  }, [lastMove, orientation, fen]);
+  }, [lastMove, orientation, fenPlacement]);
 
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [draggingFrom, setDraggingFrom] = useState<Square | null>(null);
-  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<{ from: Square; to: Square; color: Color } | null>(null);
+
+  // Refs for zero-rerender, GPU-composited piece dragging
+  const dragGhostRef = useRef<HTMLDivElement>(null);
+  const boardRectRef = useRef<DOMRect | null>(null);
+  const dragCoordsRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // User right-click annotations (like Chess.com!)
   const [userArrows, setUserArrows] = useState<BoardArrow[]>([]);
@@ -122,13 +128,23 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
   useEffect(() => {
     setSelectedSquare(null);
     setDraggingFrom(null);
-    setDragPos(null);
+    boardRectRef.current = null;
     setPendingPromotion(null);
     setUserArrows([]);
     setMarkedSquares(new Set());
     rightDragStartRef.current = null;
     suppressNextClickRef.current = false;
   }, [effectiveFen]);
+
+  // Clear active drag, selection, or promotion modal if the board becomes non-interactive (pause/timeout/gameover)
+  useEffect(() => {
+    if (!interactive) {
+      setSelectedSquare(null);
+      setDraggingFrom(null);
+      boardRectRef.current = null;
+      setPendingPromotion(null);
+    }
+  }, [interactive]);
 
   const chess = useMemo(() => {
     try {
@@ -140,20 +156,31 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
   const turn = chess.turn();
   const inCheck = chess.inCheck();
 
-  // Locate king square if in check
-  const checkedKingSquare = useMemo<Square | null>(() => {
-    if (!inCheck) return null;
+  // Single-pass piece lookup table per position (avoids 64x chess.get() calls per render)
+  const boardPieceMap = useMemo(() => {
+    const map = new Map<Square, { type: PieceSymbol; color: Color }>();
     const board = chess.board();
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const piece = board[r][c];
-        if (piece && piece.type === 'k' && piece.color === turn) {
-          return piece.square;
+        if (piece) {
+          map.set(piece.square, { type: piece.type, color: piece.color });
         }
       }
     }
+    return map;
+  }, [chess]);
+
+  // Locate king square if in check
+  const checkedKingSquare = useMemo<Square | null>(() => {
+    if (!inCheck) return null;
+    for (const [sq, piece] of boardPieceMap) {
+      if (piece.type === 'k' && piece.color === turn) {
+        return sq;
+      }
+    }
     return null;
-  }, [chess, inCheck, turn]);
+  }, [boardPieceMap, inCheck, turn]);
 
   // Compute legal destinations for the selected or dragged piece
   const activeSource = draggingFrom ?? selectedSquare;
@@ -184,8 +211,8 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
     return map;
   }, [activeSource, chess, effectiveFen, chess960Rights, interactive, allowedTurn, turn]);
 
-  const orderedRanks = orientation === 'w' ? RANKS : [...RANKS].reverse();
-  const orderedFiles = orientation === 'w' ? FILES : [...FILES].reverse();
+  const orderedRanks = useMemo(() => (orientation === 'w' ? RANKS : [...RANKS].reverse()), [orientation]);
+  const orderedFiles = useMemo(() => (orientation === 'w' ? FILES : [...FILES].reverse()), [orientation]);
 
   const canControlPiece = (pieceColor: Color) => {
     if (!interactive) return false;
@@ -198,36 +225,23 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
     const piece = chess.get(from);
     if (!piece) return false;
 
+    let isPromotion = false;
     if (chess960Rights) {
       const targets960 = getChess960LegalTargets(effectiveFen, chess960Rights, from);
       const targetMeta = targets960.get(to);
       if (!targetMeta) return false;
-
-      if (targetMeta.isPromotion) {
-        setPendingPromotion({ from, to, color: piece.color });
-        setSelectedSquare(null);
-        setDraggingFrom(null);
-        setDragPos(null);
-        return true;
-      }
-
-      const ok = onMove(from, to);
-      if (ok) {
-        setSelectedSquare(null);
-        setUserArrows([]);
-        setMarkedSquares(new Set());
-      }
-      return ok;
+      isPromotion = targetMeta.isPromotion;
+    } else {
+      const legal = chess.moves({ square: from, verbose: true }).filter((m) => m.to === to);
+      if (legal.length === 0) return false;
+      isPromotion = legal.some((m) => m.flags.includes('p'));
     }
 
-    const legal = chess.moves({ square: from, verbose: true }).filter((m) => m.to === to);
-    if (legal.length === 0) return false;
-
-    if (legal.some((m) => m.flags.includes('p'))) {
+    if (isPromotion) {
       setPendingPromotion({ from, to, color: piece.color });
       setSelectedSquare(null);
       setDraggingFrom(null);
-      setDragPos(null);
+      boardRectRef.current = null;
       return true;
     }
 
@@ -240,8 +254,8 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
     return ok;
   };
 
-  const getSquareFromPointer = (clientX: number, clientY: number): Square | null => {
-    const rect = boardRef.current?.getBoundingClientRect();
+  const getSquareFromPointer = (clientX: number, clientY: number, cachedRect?: DOMRect | null): Square | null => {
+    const rect = cachedRect ?? boardRef.current?.getBoundingClientRect();
     if (!rect) return null;
     const relX = clientX - rect.left;
     const relY = clientY - rect.top;
@@ -292,21 +306,27 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
       return;
     }
 
-    const piece = chess.get(sq);
+    const piece = boardPieceMap.get(sq);
     if (piece && canControlPiece(piece.color)) {
       const rect = boardRef.current?.getBoundingClientRect();
       if (rect) {
+        boardRectRef.current = rect;
+        dragCoordsRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
         setDraggingFrom(sq);
-        setDragPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
       }
     }
   };
 
   const handleBoardPointerMove = (e: React.PointerEvent) => {
     if (!draggingFrom) return;
-    const rect = boardRef.current?.getBoundingClientRect();
+    const rect = boardRectRef.current ?? boardRef.current?.getBoundingClientRect() ?? null;
     if (!rect) return;
-    setDragPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    dragCoordsRef.current = { x, y };
+    if (dragGhostRef.current) {
+      dragGhostRef.current.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
+    }
   };
 
   const handleBoardPointerUp = (e: React.PointerEvent) => {
@@ -337,9 +357,9 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
 
     if (!draggingFrom) return;
     const fromSq = draggingFrom;
-    const targetSq = getSquareFromPointer(e.clientX, e.clientY);
+    const targetSq = getSquareFromPointer(e.clientX, e.clientY, boardRectRef.current);
+    boardRectRef.current = null;
     setDraggingFrom(null);
-    setDragPos(null);
 
     if (targetSq && targetSq !== fromSq) {
       const moved = attemptMove(fromSq, targetSq);
@@ -350,9 +370,9 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
     }
   };
 
-  const allArrows = [...engineArrows, ...userArrows];
+  const allArrows = useMemo(() => [...engineArrows, ...userArrows], [engineArrows, userArrows]);
 
-  const draggedPiece = draggingFrom ? chess.get(draggingFrom) : null;
+  const draggedPiece = draggingFrom ? boardPieceMap.get(draggingFrom) ?? null : null;
 
   return (
     <div className="flex items-stretch gap-2.5 w-full select-none">
@@ -376,16 +396,16 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
         onPointerUp={handleBoardPointerUp}
         onPointerLeave={() => {
           rightDragStartRef.current = null;
+          boardRectRef.current = null;
           if (draggingFrom) {
             setDraggingFrom(null);
-            setDragPos(null);
           }
         }}
         onPointerCancel={() => {
           rightDragStartRef.current = null;
+          boardRectRef.current = null;
           if (draggingFrom) {
             setDraggingFrom(null);
-            setDragPos(null);
           }
         }}
       >
@@ -394,7 +414,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
             orderedFiles.map((file, colIdx) => {
               const sq = `${file}${rank}` as Square;
               const isLight = (FILES.indexOf(file) + parseInt(rank, 10)) % 2 === 1;
-              const piece = chess.get(sq);
+              const piece = boardPieceMap.get(sq);
               const isSelected = selectedSquare === sq || draggingFrom === sq;
               const isLastFrom = lastMove?.from === sq;
               const isLastTo = lastMove?.to === sq;
@@ -504,7 +524,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
                   {/* Chess.com-style move evaluation badge on destination square */}
                   {moveClassification && (
                     <MoveBadge
-                      key={`badge-${sq}-${moveClassification}-${fen.split(' ')[0]}`}
+                      key={`badge-${sq}-${moveClassification}-${fenPlacement}`}
                       classification={moveClassification}
                       variant="board"
                       className="absolute -top-0.5 -right-0.5 z-20 pointer-events-none anim-badge-pop"
@@ -571,11 +591,14 @@ export const ChessBoard: React.FC<ChessBoardProps> = React.memo(({
           </svg>
         )}
 
-        {/* Dragged Piece Ghost */}
-        {draggedPiece && dragPos && (
+        {/* Dragged Piece Ghost (GPU-composited direct transform for 0 React re-renders during drag) */}
+        {draggedPiece && (
           <div
-            className="absolute pointer-events-none z-30 w-[13%] h-[13%] -translate-x-1/2 -translate-y-1/2"
-            style={{ left: dragPos.x, top: dragPos.y }}
+            ref={dragGhostRef}
+            className="absolute top-0 left-0 pointer-events-none z-30 w-[13%] h-[13%] will-change-transform"
+            style={{
+              transform: `translate3d(${dragCoordsRef.current.x}px, ${dragCoordsRef.current.y}px, 0) translate(-50%, -50%)`,
+            }}
           >
             <ChessPiece type={draggedPiece.type} color={draggedPiece.color} pieceStyle={pieceStyle} />
           </div>

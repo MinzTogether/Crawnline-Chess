@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { EvalScore, MoveRecord } from '../types/chess';
 import { evalToWhiteWinProbability, formatEvalScore } from '../engine/uciParser';
 
@@ -16,41 +16,51 @@ export const EvalGraph: React.FC<EvalGraphProps> = React.memo(({ moves, viewPly,
   const padY = 6;
   const usableW = width - padX * 2;
   const usableH = height - padY * 2;
-
-  const points: { ply: number; prob: number; label: string; score?: EvalScore }[] = [
-    { ply: 0, prob: 50, label: 'Start' },
-  ];
-
-  let lastKnownProb = 50;
-  for (const m of moves) {
-    if (m.evalAfter) {
-      lastKnownProb = evalToWhiteWinProbability(m.evalAfter);
-    } else if (m.ply === viewPly && liveEval) {
-      lastKnownProb = evalToWhiteWinProbability(liveEval);
-    }
-    points.push({
-      ply: m.ply,
-      prob: lastKnownProb,
-      label: `${m.moveNumber}${m.color === 'w' ? '.' : '...'} ${m.san}`,
-      score: m.evalAfter,
-    });
-  }
-
-  const count = Math.max(points.length - 1, 1);
-  const coords = points.map((pt, i) => {
-    const x = padX + (i / count) * usableW;
-    const y = padY + ((100 - pt.prob) / 100) * usableH;
-    return { ...pt, x, y };
-  });
-
-  const linePath = coords.map((c, idx) => `${idx === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
   const midY = padY + usableH / 2;
-  const areaPath =
-    coords.length > 1
-      ? `${linePath} L ${coords[coords.length - 1].x.toFixed(1)} ${height - padY} L ${coords[0].x.toFixed(1)} ${height - padY} Z`
-      : '';
 
-  const activePoint = coords[Math.min(viewPly, coords.length - 1)];
+  const { points, coords, linePath, areaPath, activePoint } = useMemo(() => {
+    const pts: { ply: number; prob: number; label: string; score?: EvalScore }[] = [
+      { ply: 0, prob: 50, label: 'Start' },
+    ];
+
+    let lastKnownProb = 50;
+    for (const m of moves) {
+      if (m.evalAfter) {
+        lastKnownProb = evalToWhiteWinProbability(m.evalAfter);
+      } else if (m.ply === viewPly && liveEval) {
+        lastKnownProb = evalToWhiteWinProbability(liveEval);
+      }
+      pts.push({
+        ply: m.ply,
+        prob: lastKnownProb,
+        label: `${m.moveNumber}${m.color === 'w' ? '.' : '...'} ${m.san}`,
+        score: m.evalAfter,
+      });
+    }
+
+    const count = Math.max(pts.length - 1, 1);
+    const computedCoords = pts.map((pt, i) => {
+      const x = padX + (i / count) * usableW;
+      const y = padY + ((100 - pt.prob) / 100) * usableH;
+      return { ...pt, x, y };
+    });
+
+    const computedLinePath = computedCoords
+      .map((c, idx) => `${idx === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`)
+      .join(' ');
+    const computedAreaPath =
+      computedCoords.length > 1
+        ? `${computedLinePath} L ${computedCoords[computedCoords.length - 1].x.toFixed(1)} ${height - padY} L ${computedCoords[0].x.toFixed(1)} ${height - padY} Z`
+        : '';
+
+    return {
+      points: pts,
+      coords: computedCoords,
+      linePath: computedLinePath,
+      areaPath: computedAreaPath,
+      activePoint: computedCoords[Math.min(viewPly, computedCoords.length - 1)],
+    };
+  }, [moves, viewPly, liveEval, padX, padY, usableW, usableH, height]);
 
   return (
     <div className="bg-[var(--app-surface-2)] border border-[var(--app-border)] rounded-lg px-2.5 py-2">

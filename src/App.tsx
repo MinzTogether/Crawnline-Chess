@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chess } from 'chess.js';
 import type { Color, PieceSymbol, Square } from 'chess.js';
 import { ArrowUpDown, Home, Pause, Plus, Settings, Shuffle, Volume2, VolumeX } from 'lucide-react';
@@ -25,14 +25,15 @@ import {
   saveProfile,
   type AppPreferences,
   type SavedMatch,
+  type StorageWriteResult,
   type UserProfile,
 } from './types/preferences';
 import { StockfishAnalyzer, StockfishOpponent } from './engine/stockfishService';
 import { buildMatchRatingReport } from './engine/matchRating';
 import {
-  MAX_EVAL_CACHE_SIZE,
   positionKeyFromFen,
   stabilizeEvaluation,
+  writeCachedEval,
   type CachedEvalEntry,
 } from './engine/evalStabilizer';
 import { calculateAverageAccuracy, classifyMove } from './engine/uciParser';
@@ -95,6 +96,21 @@ function scoresEqual(a: EvalScore | undefined, b: EvalScore): boolean {
   return Boolean(a && a.type === b.type && a.value === b.value);
 }
 
+function resolveMoveSoundKind(flags: {
+  gameEnded: boolean;
+  isCheck: boolean;
+  isPromotion: boolean;
+  isCastle: boolean;
+  isCapture: boolean;
+}): 'gameover' | 'check' | 'promote' | 'castle' | 'capture' | 'move' {
+  if (flags.gameEnded) return 'gameover';
+  if (flags.isCheck) return 'check';
+  if (flags.isPromotion) return 'promote';
+  if (flags.isCastle) return 'castle';
+  if (flags.isCapture) return 'capture';
+  return 'move';
+}
+
 export default function App() {
   // Persisted Preferences, Profile, and Saved Match Archive
   const [preferences, setPreferences] = useState<AppPreferences>(() => loadPreferences());
@@ -116,7 +132,13 @@ export default function App() {
   // Active match runtime state
   const [initialFen, setInitialFen] = useState<string>(INITIAL_FEN);
   const [moves, setMoves] = useState<MoveRecord[]>([]);
+  // Incremented only when move history topology changes (new match, move, takeback, import),
+  // decoupling expensive chess history/termination/opening/material/PGN memos from evalAfter ticks.
+  const [historyVersion, setHistoryVersion] = useState<number>(0);
   const [viewPly, setViewPly] = useState<number>(0);
+  const [isDocumentHidden, setIsDocumentHidden] = useState<boolean>(
+    () => typeof document !== 'undefined' && document.visibilityState === 'hidden'
+  );
   const [humanColor, setHumanColor] = useState<Color>('w');
   const [orientation, setOrientation] = useState<Color>('w');
   const [activeMode, setActiveMode] = useState<GameMode>('stockfish');
@@ -169,7 +191,36 @@ export default function App() {
     depth: 0,
   });
 
-  // Apply App Theme, Advanced Animation tokens, Language attribute & Browser Favicon whenever preferences change
+  const prefsMountedRef = useRef(false);
+  const matchesMountedRef = useRef(false);
+  const pendingPrefsSaveRef = useRef<AppPreferences | null>(null);
+  const prefsSaveTimerRef = useRef<number | null>(null);
+  const movesRef = useRef<MoveRecord[]>(moves);
+  movesRef.current = moves;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const mutedRef = useRef(preferences.muted);
+  mutedRef.current = preferences.muted;
+  const clockDisplayRef = useRef<{ w: number | null; b: number | null }>({
+    w: whiteClock,
+    b: blackClock,
+  });
+  clockDisplayRef.current = { w: whiteClock, b: blackClock };
+
+  const flushPendingPreferencesSave = useCallback(() => {
+    if (prefsSaveTimerRef.current !== null) {
+      window.clearTimeout(prefsSaveTimerRef.current);
+      prefsSaveTimerRef.current = null;
+    }
+    if (pendingPrefsSaveRef.current) {
+      const toSave = pendingPrefsSaveRef.current;
+      pendingPrefsSaveRef.current = null;
+      savePreferences(toSave);
+    }
+  }, []);
+
+  // Apply App Theme, Advanced Animation tokens, Language attribute & Browser Favicon whenever preferences change.
+  // Never overwrite LocalStorage on initial mount so corrupted/unreadable stored data is preserved untouched.
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.appTheme = preferences.appTheme;
@@ -186,15 +237,32 @@ export default function App() {
     root.dataset.pieceLift = animTokens.dataset.pieceLift;
     root.lang = preferences.language;
     syncBrowserFavicon(preferences.appIcon);
-    savePreferences(preferences);
+
+    if (prefsMountedRef.current) {
+      // Debounce synchronous LocalStorage writes while keeping DOM visual feedback immediate
+      pendingPrefsSaveRef.current = preferences;
+      if (prefsSaveTimerRef.current !== null) {
+        window.clearTimeout(prefsSaveTimerRef.current);
+      }
+      prefsSaveTimerRef.current = window.setTimeout(() => {
+        prefsSaveTimerRef.current = null;
+        if (pendingPrefsSaveRef.current) {
+          const toSave = pendingPrefsSaveRef.current;
+          pendingPrefsSaveRef.current = null;
+          savePreferences(toSave);
+        }
+      }, 150);
+    } else {
+      prefsMountedRef.current = true;
+    }
   }, [preferences]);
 
   useEffect(() => {
-    saveProfile(profile);
-  }, [profile]);
-
-  useEffect(() => {
-    saveMatches(savedMatches);
+    if (matchesMountedRef.current) {
+      saveMatches(savedMatches);
+    } else {
+      matchesMountedRef.current = true;
+    }
   }, [savedMatches]);
 
   useEffect(() => {
@@ -215,21 +283,47 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const handleVisibilityChange = () => {
+      const hidden = document.visibilityState === 'hidden';
+      setIsDocumentHidden(hidden);
+      if (hidden) {
+        flushPendingPreferencesSave();
+      }
+    };
+    const handlePageHide = () => {
+      flushPendingPreferencesSave();
+      analyzerRef.current?.terminate();
+      opponentRef.current?.terminate();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      flushPendingPreferencesSave();
       reviewRunIdRef.current += 1;
       isReviewingRef.current = false;
       matchSessionIdRef.current += 1;
       analyzerRef.current?.terminate();
       opponentRef.current?.terminate();
     };
-  }, []);
+  }, [flushPendingPreferencesSave]);
 
   const updatePreferences = useCallback((patch: Partial<AppPreferences>) => {
     setPreferences((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  const updateProfile = useCallback((patch: Partial<UserProfile>) => {
-    setProfile((prev) => ({ ...prev, ...patch }));
+  const updateProfile = useCallback((patch: Partial<UserProfile>): StorageWriteResult => {
+    const nextProfile: UserProfile = { ...profileRef.current, ...patch };
+    const writeResult = saveProfile(nextProfile);
+    // If an avatar upload specifically overflows browser storage quota, keep the previous valid avatar
+    // intact rather than leaving the user with an unsaved photo that vanishes on reload.
+    if (!writeResult.ok && writeResult.error === 'quota_exceeded' && patch.avatarImage) {
+      return writeResult;
+    }
+    profileRef.current = nextProfile;
+    setProfile(nextProfile);
+    return writeResult;
   }, []);
 
   const ensureAnalyzer = useCallback(() => {
@@ -264,34 +358,40 @@ export default function App() {
   );
 
   const viewedChess960Rights = useMemo<Chess960CastlingRights | null>(() => {
+    void historyVersion;
     if (!isChess960 || !initialChess960Rights) return null;
     if (viewPly === 0) return initialChess960Rights;
-    return moves[viewPly - 1]?.castlingRights960 ?? initialChess960Rights;
-  }, [isChess960, initialChess960Rights, viewPly, moves]);
+    return movesRef.current[viewPly - 1]?.castlingRights960 ?? initialChess960Rights;
+  }, [isChess960, initialChess960Rights, viewPly, historyVersion]);
 
   const latestChess960Rights = useMemo<Chess960CastlingRights | null>(() => {
+    void historyVersion;
     if (!isChess960 || !initialChess960Rights) return null;
-    if (moves.length === 0) return initialChess960Rights;
-    return moves[moves.length - 1]?.castlingRights960 ?? initialChess960Rights;
-  }, [isChess960, initialChess960Rights, moves]);
+    const currentMoves = movesRef.current;
+    if (currentMoves.length === 0) return initialChess960Rights;
+    return currentMoves[currentMoves.length - 1]?.castlingRights960 ?? initialChess960Rights;
+  }, [isChess960, initialChess960Rights, historyVersion]);
 
   const viewedEngineFen = useMemo(() => {
+    void historyVersion;
     if (!isChess960) return viewedFen;
     if (viewPly === 0) return initialEngineFen;
     return (
-      moves[viewPly - 1]?.engineFenAfter ??
+      movesRef.current[viewPly - 1]?.engineFenAfter ??
       (viewedChess960Rights ? toShredderFen(viewedFen, viewedChess960Rights) : viewedFen)
     );
-  }, [isChess960, viewPly, initialEngineFen, moves, viewedChess960Rights, viewedFen]);
+  }, [isChess960, viewPly, initialEngineFen, historyVersion, viewedChess960Rights, viewedFen]);
 
   const latestEngineFen = useMemo(() => {
+    void historyVersion;
     if (!isChess960) return latestFen;
-    if (moves.length === 0) return initialEngineFen;
+    const currentMoves = movesRef.current;
+    if (currentMoves.length === 0) return initialEngineFen;
     return (
-      moves[moves.length - 1]?.engineFenAfter ??
+      currentMoves[currentMoves.length - 1]?.engineFenAfter ??
       (latestChess960Rights ? toShredderFen(latestFen, latestChess960Rights) : latestFen)
     );
-  }, [isChess960, moves, initialEngineFen, latestChess960Rights, latestFen]);
+  }, [isChess960, historyVersion, initialEngineFen, latestChess960Rights, latestFen]);
 
   // Primitive turn/FEN signals decouple bot-turn, clock, and analyzer effects from evalAfter updates.
   const latestTurn = useMemo<Color>(() => (latestFen.split(' ')[1] === 'b' ? 'b' : 'w'), [latestFen]);
@@ -305,58 +405,58 @@ export default function App() {
     }
   }, [viewedFen, allowCastling]);
 
-  const latestChess = useMemo(
-    () => buildChessWithHistory(initialFen, moves, allowCastling),
-    [initialFen, moves, allowCastling]
-  );
+  const latestChess = useMemo(() => {
+    void historyVersion;
+    return buildChessWithHistory(initialFen, movesRef.current, allowCastling);
+  }, [initialFen, historyVersion, allowCastling]);
 
-  const termination = useMemo(
-    () =>
-      evaluateGameTermination({
-        fen: latestFen,
-        initialFen,
-        initialEngineFen,
-        moves,
-        chess: latestChess,
-        allowCastling,
-        chess960Rights: latestChess960Rights,
-        timeoutLoser,
-        resignedBy,
-        agreedDraw,
-      }),
-    [
-      latestFen,
+  const termination = useMemo(() => {
+    void historyVersion;
+    return evaluateGameTermination({
+      fen: latestFen,
       initialFen,
       initialEngineFen,
-      moves,
-      latestChess,
+      moves: movesRef.current,
+      chess: latestChess,
       allowCastling,
-      latestChess960Rights,
+      chess960Rights: latestChess960Rights,
       timeoutLoser,
       resignedBy,
       agreedDraw,
-    ]
-  );
+    });
+  }, [
+    latestFen,
+    initialFen,
+    initialEngineFen,
+    historyVersion,
+    latestChess,
+    allowCastling,
+    latestChess960Rights,
+    timeoutLoser,
+    resignedBy,
+    agreedDraw,
+  ]);
 
   const opening = useMemo(() => {
+    void historyVersion;
     if (activeVariant !== 'standard') return null;
-    const sanList = moves.slice(0, viewPly).map((m) => m.san);
+    const sanList = movesRef.current.slice(0, viewPly).map((m) => m.san);
     return detectOpening(sanList);
-  }, [moves, viewPly, activeVariant]);
+  }, [historyVersion, viewPly, activeVariant]);
 
-  const fullGameOpening = useMemo(
-    () => (activeVariant === 'standard' ? detectOpening(moves.map((m) => m.san)) : null),
-    [moves, activeVariant]
-  );
+  const fullGameOpening = useMemo(() => {
+    void historyVersion;
+    return activeVariant === 'standard' ? detectOpening(movesRef.current.map((m) => m.san)) : null;
+  }, [historyVersion, activeVariant]);
 
-  const material = useMemo(
-    () =>
-      getMaterialSummary(viewedFen, {
-        initialFen,
-        moves: viewPly === moves.length ? moves : moves.slice(0, viewPly),
-      }),
-    [viewedFen, initialFen, moves, viewPly]
-  );
+  const material = useMemo(() => {
+    void historyVersion;
+    const currentMoves = movesRef.current;
+    return getMaterialSummary(viewedFen, {
+      initialFen,
+      moves: viewPly === currentMoves.length ? currentMoves : currentMoves.slice(0, viewPly),
+    });
+  }, [viewedFen, initialFen, historyVersion, viewPly]);
 
   const whiteAccuracy = useMemo(
     () =>
@@ -416,19 +516,18 @@ export default function App() {
         ? 'Analysis'
         : '';
 
-  const pgnText = useMemo(
-    () =>
-      buildPgn({
-        initialFen,
-        moves,
-        whiteName,
-        blackName,
-        result: termination.resultString,
-        variant: isChess960 ? 'Chess960' : undefined,
-        pgnInitialFen: isChess960 ? initialEngineFen : initialFen,
-      }),
-    [initialFen, initialEngineFen, isChess960, moves, whiteName, blackName, termination.resultString]
-  );
+  const pgnText = useMemo(() => {
+    void historyVersion;
+    return buildPgn({
+      initialFen,
+      moves: movesRef.current,
+      whiteName,
+      blackName,
+      result: termination.resultString,
+      variant: isChess960 ? 'Chess960' : undefined,
+      pgnInitialFen: isChess960 ? initialEngineFen : initialFen,
+    });
+  }, [initialFen, initialEngineFen, isChess960, historyVersion, whiteName, blackName, termination.resultString]);
 
   // Start / Restart a match
   const startMatch = useCallback(
@@ -499,6 +598,7 @@ export default function App() {
       setActiveMatchId(newMatchId);
       archivedMatchRef.current = null;
       setMoves([]);
+      setHistoryVersion((v) => v + 1);
       setViewPly(0);
       setResignedBy(null);
       setTimeoutLoser(null);
@@ -544,26 +644,62 @@ export default function App() {
     [matchSettings, preferences.language, cancelOngoingReview]
   );
 
+  // Keep mutable move context in a ref so applyMove keeps a stable identity across evalAfter ticks,
+  // preserving React.memo(ChessBoard) and preventing bot-turn effect teardowns mid-search.
+  const moveContextRef = useRef({
+    appState,
+    activeMode,
+    allowCastling,
+    isChess960,
+    initialChess960Rights,
+    initialEngineFen,
+    isGameOver: termination.isOver,
+    isViewingLatest,
+    moves,
+    viewPly,
+    initialFen,
+    incrementSec,
+    muted: preferences.muted,
+    isReviewing,
+  });
+  moveContextRef.current = {
+    appState,
+    activeMode,
+    allowCastling,
+    isChess960,
+    initialChess960Rights,
+    initialEngineFen,
+    isGameOver: termination.isOver,
+    isViewingLatest,
+    moves,
+    viewPly,
+    initialFen,
+    incrementSec,
+    muted: preferences.muted,
+    isReviewing,
+  };
+
   // Core move application
   const applyMove = useCallback(
     (from: Square, to: Square, promotion?: PieceSymbol): boolean => {
-      if (appState !== 'playing' && activeMode !== 'analysis') return false;
-      if (termination.isOver && activeMode !== 'analysis') return false;
+      const ctx = moveContextRef.current;
+      if (ctx.appState !== 'playing' && ctx.activeMode !== 'analysis') return false;
+      if (ctx.isGameOver && ctx.activeMode !== 'analysis') return false;
 
-      const baseMoves = isViewingLatest ? moves : moves.slice(0, viewPly);
-      const baseFen = baseMoves.length > 0 ? baseMoves[baseMoves.length - 1].fenAfter : initialFen;
+      const baseMoves = ctx.isViewingLatest ? ctx.moves : ctx.moves.slice(0, ctx.viewPly);
+      const baseFen = baseMoves.length > 0 ? baseMoves[baseMoves.length - 1].fenAfter : ctx.initialFen;
       const movingColor: Color = baseFen.split(' ')[1] === 'b' ? 'b' : 'w';
       const moveNowMs = Date.now();
 
       // Check clock BEFORE applying or committing the move so flagged players cannot play after timeout
-      if (activeMode !== 'analysis' && clockRef.current !== null) {
+      if (ctx.activeMode !== 'analysis' && clockRef.current !== null) {
         const preCheck = checkClockBeforeMove(clockRef.current, movingColor, moveNowMs);
         if (!preCheck.allowed) {
           clockRef.current = preCheck.nextState;
           setWhiteClock(quantizeClockDisplay(preCheck.nextState.w));
           setBlackClock(quantizeClockDisplay(preCheck.nextState.b));
           setTimeoutLoser(preCheck.expiredColor);
-          playChessSound('gameover', preferences.muted);
+          playChessSound('gameover', ctx.muted);
           return false;
         }
       }
@@ -577,16 +713,16 @@ export default function App() {
       let gameEnded: boolean;
       let soundKind: 'gameover' | 'check' | 'promote' | 'castle' | 'capture' | 'move';
 
-      if (isChess960 && initialChess960Rights) {
+      if (ctx.isChess960 && ctx.initialChess960Rights) {
         const baseRights =
           baseMoves.length > 0
-            ? baseMoves[baseMoves.length - 1].castlingRights960 ?? initialChess960Rights
-            : initialChess960Rights;
+            ? baseMoves[baseMoves.length - 1].castlingRights960 ?? ctx.initialChess960Rights
+            : ctx.initialChess960Rights;
         const moveNumber =
           parseInt(baseFen.split(' ')[5] || '1', 10) || Math.floor(baseMoves.length / 2) + 1;
         const applied960 = applyChess960Move(baseFen, baseRights, from, to, promotion);
         if (!applied960) {
-          playChessSound('illegal', preferences.muted);
+          playChessSound('illegal', ctx.muted);
           return false;
         }
         movedColor = applied960.color;
@@ -607,31 +743,27 @@ export default function App() {
           castlingRights960: applied960.castlingRightsAfter,
           bestMoveBefore: bestBefore,
         };
-        const isThreefold = hasThreefoldRepetitionInHistory(initialEngineFen, [...baseMoves, newRecord]);
+        const isThreefold = hasThreefoldRepetitionInHistory(ctx.initialEngineFen, [...baseMoves, newRecord]);
         gameEnded = applied960.isCheckmate || applied960.isDraw || isThreefold;
-        soundKind = gameEnded
-          ? 'gameover'
-          : applied960.isCheck
-            ? 'check'
-            : applied960.isPromotion
-              ? 'promote'
-              : applied960.isCastle
-                ? 'castle'
-                : applied960.isCapture
-                  ? 'capture'
-                  : 'move';
+        soundKind = resolveMoveSoundKind({
+          gameEnded,
+          isCheck: applied960.isCheck,
+          isPromotion: applied960.isPromotion,
+          isCastle: applied960.isCastle,
+          isCapture: applied960.isCapture,
+        });
       } else {
         const applied = applyRuleMove({
-          initialFen,
+          initialFen: ctx.initialFen,
           moves: baseMoves,
           from,
           to,
           promotion,
-          allowCastling,
+          allowCastling: ctx.allowCastling,
         });
 
         if (!applied) {
-          playChessSound('illegal', preferences.muted);
+          playChessSound('illegal', ctx.muted);
           return false;
         }
 
@@ -652,29 +784,24 @@ export default function App() {
           fenAfter: applied.fenAfter,
           bestMoveBefore: bestBefore,
         };
-        soundKind =
-          applied.isCheckmate || applied.isDraw
-            ? 'gameover'
-            : applied.isCheck
-              ? 'check'
-              : applied.isPromotion
-                ? 'promote'
-                : applied.isCastle
-                  ? 'castle'
-                  : applied.isCapture
-                    ? 'capture'
-                    : 'move';
+        soundKind = resolveMoveSoundKind({
+          gameEnded,
+          isCheck: applied.isCheck,
+          isPromotion: applied.isPromotion,
+          isCastle: applied.isCastle,
+          isCapture: applied.isCapture,
+        });
       }
 
       // Compute & verify final clock commit BEFORE mutating moves state
       let committedClock: ClockState | null = null;
-      if (activeMode !== 'analysis' && clockRef.current !== null) {
+      if (ctx.activeMode !== 'analysis' && clockRef.current !== null) {
         const nextTurn: Color = movedColor === 'w' ? 'b' : 'w';
         const { nextState, expiredColor } = commitMoveClock(
           clockRef.current,
           movedColor,
           nextTurn,
-          incrementSec,
+          ctx.incrementSec,
           moveNowMs,
           gameEnded
         );
@@ -683,7 +810,7 @@ export default function App() {
           setWhiteClock(quantizeClockDisplay(nextState.w));
           setBlackClock(quantizeClockDisplay(nextState.b));
           setTimeoutLoser(expiredColor);
-          playChessSound('gameover', preferences.muted);
+          playChessSound('gameover', ctx.muted);
           return false;
         }
         committedClock = nextState;
@@ -697,7 +824,7 @@ export default function App() {
         };
       }
 
-      if (isReviewing || isReviewingRef.current) {
+      if (ctx.isReviewing || isReviewingRef.current) {
         cancelOngoingReview();
       }
       if (committedClock !== null) {
@@ -706,29 +833,14 @@ export default function App() {
         setBlackClock(quantizeClockDisplay(committedClock.b));
       }
       setMoves(nextMoves);
+      setHistoryVersion((v) => v + 1);
       setViewPly(nextMoves.length);
       setHintArrow(null);
 
-      playChessSound(soundKind, preferences.muted);
+      playChessSound(soundKind, ctx.muted);
       return true;
     },
-    [
-      appState,
-      activeMode,
-      allowCastling,
-      isChess960,
-      initialChess960Rights,
-      initialEngineFen,
-      termination.isOver,
-      isViewingLatest,
-      moves,
-      viewPly,
-      initialFen,
-      incrementSec,
-      preferences.muted,
-      isReviewing,
-      cancelOngoingReview,
-    ]
+    [cancelOngoingReview]
   );
 
   // Trigger game-over state and archive completed match to Profile history
@@ -736,7 +848,7 @@ export default function App() {
     if (appState === 'playing' && termination.isOver && activeMode !== 'analysis') {
       setAppState('gameover');
       setGameOverDismissed(false);
-      opponentRef.current?.cancel();
+      opponentRef.current?.terminate();
       setIsBotThinking(false);
 
       if (moves.length >= 2 && activeMatchId && archivedMatchRef.current !== activeMatchId) {
@@ -792,6 +904,12 @@ export default function App() {
       setEngineAnalysis((prev) => (prev ? { ...prev, isSearching: false } : prev));
       return;
     }
+    if (appState === 'paused' || isDocumentHidden) {
+      // Suspend realtime Stockfish CPU usage while paused or backgrounded; worker stays warm for instant resume.
+      analyzerRef.current?.stop();
+      setEngineAnalysis((prev) => (prev && prev.isSearching ? { ...prev, isSearching: false } : prev));
+      return;
+    }
 
     let cancelled = false;
     const sessionId = matchSessionIdRef.current;
@@ -806,6 +924,7 @@ export default function App() {
       viewedBoardChess.isGameOver() && !(viewedBoardChess.isStalemate() && canViewedCastle960);
 
     if (isViewedPositionOver) {
+      analyzerRef.current?.stop();
       const mateScore: EvalScore = viewedBoardChess.isCheckmate()
         ? { type: 'mate', value: viewedBoardChess.turn() === 'w' ? -1 : 1 }
         : { type: 'cp', value: 0 };
@@ -916,6 +1035,7 @@ export default function App() {
     appState,
     engineEnabled,
     isReviewing,
+    isDocumentHidden,
     viewedFen,
     viewedEngineFen,
     viewedChess960Rights,
@@ -1007,8 +1127,8 @@ export default function App() {
     const now = Date.now();
     if (!clockRef.current) {
       clockRef.current = {
-        w: whiteClock ?? 600,
-        b: blackClock ?? 600,
+        w: clockDisplayRef.current.w ?? 600,
+        b: clockDisplayRef.current.b ?? 600,
         activeTurn: activeClockTurn,
         turnStartedAtMs: now,
       };
@@ -1036,7 +1156,7 @@ export default function App() {
         }
         clockRef.current = pauseClockState(snap, tickNow);
         setTimeoutLoser(rem.expiredColor);
-        playChessSound('gameover', preferences.muted);
+        playChessSound('gameover', mutedRef.current);
       }
     };
 
@@ -1044,7 +1164,7 @@ export default function App() {
     return () => {
       if (timer !== null) window.clearInterval(timer);
     };
-  }, [shouldClockRun, activeClockTurn, preferences.muted]);
+  }, [shouldClockRun, activeClockTurn]);
 
   // Full Match Rating / Game Review pass across explicit or current moves
   const runMatchRatingPass = useCallback(
@@ -1092,14 +1212,7 @@ export default function App() {
           isCancelled: () => reviewRunIdRef.current !== runId,
           onMoveReviewed: ({ reviewedMoves, progressPct, engineFen, score, depth }) => {
             if (reviewRunIdRef.current !== runId) return;
-            const cacheKey = positionKeyFromFen(engineFen);
-            if (evalCacheRef.current.has(cacheKey)) {
-              evalCacheRef.current.delete(cacheKey);
-            } else if (evalCacheRef.current.size >= MAX_EVAL_CACHE_SIZE) {
-              const oldestKey = evalCacheRef.current.keys().next().value;
-              if (oldestKey !== undefined) evalCacheRef.current.delete(oldestKey);
-            }
-            evalCacheRef.current.set(cacheKey, { score, depth });
+            writeCachedEval(evalCacheRef.current, positionKeyFromFen(engineFen), { score, depth });
             setReviewProgress(progressPct);
             setMoves(reviewedMoves);
           },
@@ -1150,7 +1263,8 @@ export default function App() {
   }, [moves, isReviewing, runMatchRatingPass, initialFen, activeMatchId, activeVariant, initialChess960Rights]);
 
   const handleRequestHint = useCallback(() => {
-    const bestUci = engineAnalysis?.bestMoveUci ?? engineAnalysis?.lines[0]?.pvUci[0];
+    const latestAnalysis = latestAnalysisRef.current;
+    const bestUci = latestAnalysis?.bestMoveUci ?? latestAnalysis?.lines[0]?.pvUci[0];
     if (bestUci && bestUci.length >= 4) {
       setHintArrow({
         from: bestUci.slice(0, 2) as Square,
@@ -1162,7 +1276,7 @@ export default function App() {
       setEngineEnabled(true);
       setShowBestArrow(true);
     }
-  }, [engineAnalysis]);
+  }, []);
 
   const handleTakeback = useCallback(() => {
     if (moves.length === 0) return;
@@ -1178,6 +1292,7 @@ export default function App() {
     const popCount = activeMode === 'stockfish' && latestTurn === humanColor && moves.length >= 2 ? 2 : 1;
     const nextMoves = moves.slice(0, Math.max(0, moves.length - popCount));
     setMoves(nextMoves);
+    setHistoryVersion((v) => v + 1);
     setViewPly(nextMoves.length);
     if (clockRef.current && activeMode !== 'analysis') {
       const nextFen = nextMoves.length > 0 ? nextMoves[nextMoves.length - 1].fenAfter : initialFen;
@@ -1226,6 +1341,7 @@ export default function App() {
       );
       setActiveMatchId(null);
       setMoves(parsed.moves);
+      setHistoryVersion((v) => v + 1);
       setViewPly(parsed.moves.length);
       setResignedBy(null);
       setTimeoutLoser(null);
@@ -1319,19 +1435,19 @@ export default function App() {
         setViewPly((p) => Math.max(0, p - 1));
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        setViewPly((p) => Math.min(moves.length, p + 1));
+        setViewPly((p) => Math.min(movesRef.current.length, p + 1));
       } else if (e.key === 'Home') {
         e.preventDefault();
         setViewPly(0);
       } else if (e.key === 'End') {
         e.preventDefault();
-        setViewPly(moves.length);
+        setViewPly(movesRef.current.length);
       } else if (e.key.toLowerCase() === 'f') {
         setOrientation((o) => (o === 'w' ? 'b' : 'w'));
       } else if (e.key.toLowerCase() === 'h') {
         handleRequestHint();
       } else if (e.key.toLowerCase() === 'm') {
-        updatePreferences({ muted: !preferences.muted });
+        updatePreferences({ muted: !mutedRef.current });
       }
     };
 
@@ -1340,11 +1456,9 @@ export default function App() {
   }, [
     appState,
     gameOverDismissed,
-    moves.length,
     showNewMatchModal,
     handleRequestHint,
     updatePreferences,
-    preferences.muted,
   ]);
 
   // Compute live Stockfish arrows for the board
@@ -1407,16 +1521,20 @@ export default function App() {
 
   const showMoveEvaluationBadges = activeMode === 'analysis';
 
+  const viewedLastFrom = viewedLastMove?.from;
+  const viewedLastTo = viewedLastMove?.to;
+  const viewedLastClassification = showMoveEvaluationBadges ? viewedLastMove?.classification : undefined;
+
   const boardLastMove = useMemo(
     () =>
-      viewedLastMove
+      viewedLastFrom && viewedLastTo
         ? {
-            from: viewedLastMove.from,
-            to: viewedLastMove.to,
-            classification: showMoveEvaluationBadges ? viewedLastMove.classification : undefined,
+            from: viewedLastFrom,
+            to: viewedLastTo,
+            classification: viewedLastClassification,
           }
         : null,
-    [viewedLastMove, showMoveEvaluationBadges]
+    [viewedLastFrom, viewedLastTo, viewedLastClassification]
   );
 
   const handleSelectPly = useCallback((ply: number) => {

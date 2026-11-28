@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlignJustify,
   Award,
@@ -183,6 +183,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   const { t } = useI18n();
   const moveListContainerRef = useRef<HTMLDivElement>(null);
   const activeMoveBtnRef = useRef<HTMLButtonElement | null>(null);
+  const isMountedRef = useRef(true);
   const copyTimerRef = useRef<number | null>(null);
   const importTimerRef = useRef<number | null>(null);
   const [importInput, setImportInput] = useState('');
@@ -194,7 +195,9 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   );
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       if (importTimerRef.current !== null) window.clearTimeout(importTimerRef.current);
     };
@@ -226,19 +229,22 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
     }
   }, [moves.length, viewPly, activeTab, moveViewMode]);
 
-  const moveRows: { moveNumber: number; white?: MoveRecord; black?: MoveRecord }[] = [];
-  for (const m of moves) {
-    const lastRow = moveRows[moveRows.length - 1];
-    if (m.color === 'w' || !lastRow || lastRow.moveNumber !== m.moveNumber || lastRow.black) {
-      moveRows.push({
-        moveNumber: m.moveNumber,
-        white: m.color === 'w' ? m : undefined,
-        black: m.color === 'b' ? m : undefined,
-      });
-    } else {
-      lastRow.black = m;
+  const moveRows = useMemo(() => {
+    const rows: { moveNumber: number; white?: MoveRecord; black?: MoveRecord }[] = [];
+    for (const m of moves) {
+      const lastRow = rows[rows.length - 1];
+      if (m.color === 'w' || !lastRow || lastRow.moveNumber !== m.moveNumber || lastRow.black) {
+        rows.push({
+          moveNumber: m.moveNumber,
+          white: m.color === 'w' ? m : undefined,
+          black: m.color === 'b' ? m : undefined,
+        });
+      } else {
+        lastRow.black = m;
+      }
     }
-  }
+    return rows;
+  }, [moves]);
 
   const currentAnalysis =
     engineAnalysis && engineAnalysis.fen === currentFen ? engineAnalysis : null;
@@ -268,12 +274,12 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
         copied = false;
       }
     }
-    if (copied) {
+    if (copied && isMountedRef.current) {
       setCopiedType(kind);
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => {
         copyTimerRef.current = null;
-        setCopiedType(null);
+        if (isMountedRef.current) setCopiedType(null);
       }, 1800);
     }
   };

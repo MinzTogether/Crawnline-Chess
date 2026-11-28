@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Chess, type Square } from 'chess.js';
 import {
   applyRuleMove,
   buildChessWithHistory,
@@ -54,12 +55,12 @@ test('getMaterialSummary handles pawn promotion, capture-promotion, and capturin
   const initialFen = 'r5k1/4P3/8/8/8/8/8/4K2R w - - 0 1';
   const moves: MoveRecord[] = [];
 
-  const play = (from: string, to: string, promotion?: 'q' | 'r' | 'b' | 'n') => {
+  const play = (from: Square, to: Square, promotion?: 'q' | 'r' | 'b' | 'n') => {
     const res = applyRuleMove({
       initialFen,
       moves,
-      from: from as any,
-      to: to as any,
+      from,
+      to,
       promotion,
       allowCastling: false,
     });
@@ -147,12 +148,12 @@ test('getMaterialSummary handles multiple pieces of same type, Custom Positions,
   // Custom Position: White has 3 Queens (27), Black has 2 Rooks + 2 Queens (28) -> advantage = -1
   const customFen = 'qq1rk1r1/8/8/8/8/8/8/QQQ1K3 w - - 0 1';
   const customMoves: MoveRecord[] = [];
-  const playCustom = (from: string, to: string) => {
+  const playCustom = (from: Square, to: Square) => {
     const res = applyRuleMove({
       initialFen: customFen,
       moves: customMoves,
-      from: from as any,
-      to: to as any,
+      from,
+      to,
       allowCastling: false,
     });
     assert.ok(res);
@@ -298,7 +299,7 @@ test('evaluateGameTermination detects checkmate, resignation, timeout, and ongoi
 
 test('evaluateGameTermination detects threefold repetition when full move history is maintained', () => {
   const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  const seq: Array<[string, string]> = [
+  const seq: Array<[Square, Square]> = [
     ['g1', 'f3'],
     ['g8', 'f6'],
     ['f3', 'g1'],
@@ -314,8 +315,8 @@ test('evaluateGameTermination detects threefold repetition when full move histor
     const res = applyRuleMove({
       initialFen: startFen,
       moves,
-      from: from as any,
-      to: to as any,
+      from,
+      to,
       allowCastling: true,
     });
     assert.ok(res);
@@ -356,12 +357,12 @@ test('moving the king permanently strips castling rights even after returning to
   const startFen = 'r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1';
   const moves: MoveRecord[] = [];
 
-  const play = (from: string, to: string, allowCastling = true) => {
+  const play = (from: Square, to: Square, allowCastling = true) => {
     const res = applyRuleMove({
       initialFen: startFen,
       moves,
-      from: from as any,
-      to: to as any,
+      from,
+      to,
       allowCastling,
     });
     if (!res) return null;
@@ -612,4 +613,204 @@ test('evaluateGameTermination respects Chess960 Shredder-FEN castling rights for
   });
   assert.equal(isThreefold.isOver, true);
   assert.equal(isThreefold.reason, 'Threefold repetition');
+});
+
+test('applyRuleMove validates all four promotion targets, underpromotion check, promotion checkmate, Black rank-1 promotion, and pinned pawn rejection', () => {
+  // 1. All 4 promotion pieces (q, r, b, n)
+  const promoFen = '4k3/1P6/8/8/8/8/8/4K3 w - - 0 1';
+  const expectedSan: Record<'q' | 'r' | 'b' | 'n', string> = {
+    q: 'b8=Q+',
+    r: 'b8=R+',
+    b: 'b8=B',
+    n: 'b8=N',
+  };
+  for (const piece of ['q', 'r', 'b', 'n'] as const) {
+    const res = applyRuleMove({
+      initialFen: promoFen,
+      moves: [],
+      from: 'b7',
+      to: 'b8',
+      promotion: piece,
+      allowCastling: false,
+    });
+    assert.ok(res, `Expected promotion to ${piece} to succeed`);
+    assert.equal(res.promotion, piece);
+    assert.equal(res.san, expectedSan[piece]);
+    assert.equal(res.uci, `b7b8${piece}`);
+    assert.equal(new Chess(res.fenAfter).get('b8')?.type, piece);
+  }
+
+  // 2. Underpromotion delivering check (=N+)
+  const knightCheckFen = '3k4/4P3/8/8/8/8/8/4K3 w - - 0 1';
+  const knightPromo = applyRuleMove({
+    initialFen: knightCheckFen,
+    moves: [],
+    from: 'e7',
+    to: 'e8',
+    promotion: 'n',
+    allowCastling: false,
+  });
+  assert.ok(knightPromo);
+  assert.equal(knightPromo.san, 'e8=N');
+  // Knight on c8 checks King on e7: let's test direct underpromotion check c7->c8=N+ vs Ke7
+  const knightDirectCheckFen = '8/2P1k3/8/8/8/8/8/4K3 w - - 0 1';
+  const knightCheck = applyRuleMove({
+    initialFen: knightDirectCheckFen,
+    moves: [],
+    from: 'c7',
+    to: 'c8',
+    promotion: 'n',
+    allowCastling: false,
+  });
+  assert.ok(knightCheck);
+  assert.equal(knightCheck.san, 'c8=N+');
+  assert.equal(knightCheck.isCheck, true);
+
+  // 3. Promotion delivering checkmate (=Q#)
+  const matePromoFen = '6k1/4Pppp/8/8/8/8/8/4K3 w - - 0 1';
+  const matePromo = applyRuleMove({
+    initialFen: matePromoFen,
+    moves: [],
+    from: 'e7',
+    to: 'e8',
+    promotion: 'q',
+    allowCastling: false,
+  });
+  assert.ok(matePromo);
+  assert.equal(matePromo.san, 'e8=Q#');
+  const term = evaluateGameTermination({ fen: matePromo.fenAfter, allowCastling: false });
+  assert.equal(term.isOver, true);
+  assert.equal(term.winner, 'w');
+  assert.equal(term.reason, 'Checkmate');
+
+  // 4. Black pawn promotion on rank 1
+  const blackPromoFen = '4k3/8/8/8/8/8/6p1/4K3 b - - 0 1';
+  const blackPromo = applyRuleMove({
+    initialFen: blackPromoFen,
+    moves: [],
+    from: 'g2',
+    to: 'g1',
+    promotion: 'q',
+    allowCastling: false,
+  });
+  assert.ok(blackPromo);
+  assert.equal(blackPromo.san, 'g1=Q+');
+  assert.equal(blackPromo.uci, 'g2g1q');
+  assert.equal(new Chess(blackPromo.fenAfter).get('g1')?.type, 'q');
+
+  // 5. Pinned pawn cannot legally capture-promote off the pin line (White Ke1, Pe7, Black Re8 -> e7xd8=Q exposes Ke1 to Re8!)
+  const pinnedFen = '3br1k1/4P3/8/8/8/8/8/4K3 w - - 0 1';
+  const illegalPinnedPromo = applyRuleMove({
+    initialFen: pinnedFen,
+    moves: [],
+    from: 'e7',
+    to: 'd8',
+    promotion: 'q',
+    allowCastling: false,
+  });
+  assert.equal(illegalPinnedPromo, null);
+});
+
+test('getMaterialSummary tracks multi-promotion captures, ply-by-ply timeline scrubbing, and asymmetric custom positions accurately', () => {
+  // Multi-promotion + partial capture:
+  // Start: White Ka1, Ra2, Pa7, Pb7 (5 + 1 + 1 = 7) vs Black Kh8, Rd8, Re8 (10) -> advantage = -3
+  const initialFen = '3rr2k/PP6/8/8/8/8/R7/K7 w - - 0 1';
+  const moves: MoveRecord[] = [];
+  const play = (from: Square, to: Square, promotion?: 'q' | 'r' | 'b' | 'n') => {
+    const res = applyRuleMove({
+      initialFen,
+      moves,
+      from,
+      to,
+      promotion,
+      allowCastling: false,
+    });
+    assert.ok(res, `Expected legal move ${from}->${to}`);
+    moves.push({
+      ply: moves.length + 1,
+      moveNumber: res.moveNumber,
+      color: res.color,
+      san: res.san,
+      uci: res.uci,
+      from: res.from,
+      to: res.to,
+      piece: res.piece,
+      captured: res.captured,
+      promotion: res.promotion,
+      fenBefore: res.fenBefore,
+      fenAfter: res.fenAfter,
+    });
+    return res;
+  };
+
+  // Ply 1: a7->a8=Q (White: Q+R+P = 15 vs Black: 2R = 10 -> +5, captures: none)
+  play('a7', 'a8', 'q');
+  // Ply 2: Rd8xa8 (Black captures promoted Queen! White: R+P = 6 vs Black: 2R = 10 -> -4, Black captured ['q'])
+  play('d8', 'a8');
+  // Ply 3: b7->b8=Q (White promotes 2nd pawn -> White: Q+R = 14 vs Black: 2R = 10 -> +4, Black captured ['q'])
+  play('b7', 'b8', 'q');
+  // Ply 4: Ra8xa2 (Black captures White's original Rook! White: Q = 9 vs Black: 2R = 10 -> -1, Black captured ['q', 'r'])
+  play('a8', 'a2');
+
+  // Verify ply-by-ply timeline scrubbing across every ply 0..4
+  const expectedByPly: Array<{
+    fen: string;
+    capturedByWhite: string[];
+    capturedByBlack: string[];
+    advantage: number;
+  }> = [
+    { fen: initialFen, capturedByWhite: [], capturedByBlack: [], advantage: -3 },
+    { fen: moves[0].fenAfter, capturedByWhite: [], capturedByBlack: [], advantage: 5 },
+    { fen: moves[1].fenAfter, capturedByWhite: [], capturedByBlack: ['q'], advantage: -4 },
+    { fen: moves[2].fenAfter, capturedByWhite: [], capturedByBlack: ['q'], advantage: 4 },
+    { fen: moves[3].fenAfter, capturedByWhite: [], capturedByBlack: ['q', 'r'], advantage: -1 },
+  ];
+
+  expectedByPly.forEach((exp, ply) => {
+    const summary = getMaterialSummary(exp.fen, {
+      initialFen,
+      moves: moves.slice(0, ply),
+    });
+    assert.deepEqual(summary.capturedByWhite, exp.capturedByWhite, `capturedByWhite mismatch at ply ${ply}`);
+    assert.deepEqual(summary.capturedByBlack, exp.capturedByBlack, `capturedByBlack mismatch at ply ${ply}`);
+    assert.equal(summary.advantage, exp.advantage, `advantage mismatch at ply ${ply}`);
+  });
+
+  // Asymmetric Custom Position: White starts down a Queen (White R=5 vs Black Q+N=12 -> -7), captures Black Knight -> ONLY ['n'] captured, advantage = -4
+  const asymFen = 'q3k3/8/8/8/8/2n5/8/2R1K3 w - - 0 1';
+  const beforeCap = getMaterialSummary(asymFen, { initialFen: asymFen, moves: [] });
+  assert.deepEqual(beforeCap.capturedByWhite, []);
+  assert.deepEqual(beforeCap.capturedByBlack, []);
+  assert.equal(beforeCap.advantage, -7);
+
+  const capKnight = applyRuleMove({
+    initialFen: asymFen,
+    moves: [],
+    from: 'c1',
+    to: 'c3',
+    allowCastling: false,
+  });
+  assert.ok(capKnight);
+  const afterCap = getMaterialSummary(capKnight.fenAfter, {
+    initialFen: asymFen,
+    moves: [
+      {
+        ply: 1,
+        moveNumber: capKnight.moveNumber,
+        color: capKnight.color,
+        san: capKnight.san,
+        uci: capKnight.uci,
+        from: capKnight.from,
+        to: capKnight.to,
+        piece: capKnight.piece,
+        captured: capKnight.captured,
+        promotion: capKnight.promotion,
+        fenBefore: capKnight.fenBefore,
+        fenAfter: capKnight.fenAfter,
+      },
+    ],
+  });
+  assert.deepEqual(afterCap.capturedByWhite, ['n']);
+  assert.deepEqual(afterCap.capturedByBlack, []);
+  assert.equal(afterCap.advantage, -4);
 });

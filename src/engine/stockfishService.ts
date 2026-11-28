@@ -2,15 +2,30 @@ import type { Color } from 'chess.js';
 import type { EngineAnalysis, EngineLine, EvalScore, StockfishLevel } from '../types/chess';
 import { uciLineToSan } from '../game/chessLogic';
 import { uciLineToSan960, type Chess960CastlingRights } from '../game/chess960';
+import { resolvePublicAssetUrl } from '../utils/assetUrl';
 import { parseBestMoveLine, parseUciInfoLine } from './uciParser';
 
 export type StockfishBackend = 'wasm' | 'asmjs';
 
+export interface BootableWorkerEventMap {
+  message: MessageEvent;
+  error: ErrorEvent;
+  messageerror: MessageEvent;
+}
+
+export type BootableWorkerEventType = keyof BootableWorkerEventMap;
+
 export interface BootableWorkerLike {
   postMessage(message: string): void;
   terminate(): void;
-  addEventListener(type: 'message' | 'error' | 'messageerror', listener: (event: any) => void): void;
-  removeEventListener(type: 'message' | 'error' | 'messageerror', listener: (event: any) => void): void;
+  addEventListener<K extends BootableWorkerEventType>(
+    type: K,
+    listener: (event: BootableWorkerEventMap[K]) => void
+  ): void;
+  removeEventListener<K extends BootableWorkerEventType>(
+    type: K,
+    listener: (event: BootableWorkerEventMap[K]) => void
+  ): void;
 }
 
 export interface StockfishBootCallbacks {
@@ -123,8 +138,8 @@ export function bootStockfishWorker(
   options: StockfishBootOptions = {}
 ): Promise<StockfishBootResult> {
   const handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
-  const wasmUrl = options.wasmUrl ?? DEFAULT_WASM_URL;
-  const asmJsUrl = options.asmJsUrl ?? DEFAULT_ASMJS_URL;
+  const wasmUrl = options.wasmUrl ?? resolvePublicAssetUrl(DEFAULT_WASM_URL);
+  const asmJsUrl = options.asmJsUrl ?? resolvePublicAssetUrl(DEFAULT_ASMJS_URL);
   const detectWasm = options.detectWasm ?? detectWasmSupport;
   const createWorker = options.createWorker ?? ((url: string) => new Worker(url));
 
@@ -219,10 +234,10 @@ export function bootStockfishWorker(
             clearHandshakeTimer();
             detachInitListeners();
 
-            const onRuntimeError = (errEvent: unknown) => {
+            const onRuntimeError = (errEvent: ErrorEvent) => {
               callbacks.onError(toError(errEvent, `Stockfish ${backend} worker runtime error`));
             };
-            const onRuntimeMessageError = (errEvent: unknown) => {
+            const onRuntimeMessageError = (errEvent: MessageEvent) => {
               callbacks.onError(
                 toError(errEvent, `Stockfish ${backend} worker message deserialization error`)
               );
@@ -244,11 +259,11 @@ export function bootStockfishWorker(
         }
       };
 
-      const onInitError = (errEvent: unknown) => {
+      const onInitError = (errEvent: ErrorEvent) => {
         handleAttemptFailure(errEvent, `Stockfish ${backend} worker error during handshake`);
       };
 
-      const onInitMessageError = (errEvent: unknown) => {
+      const onInitMessageError = (errEvent: MessageEvent) => {
         handleAttemptFailure(errEvent, `Stockfish ${backend} worker messageerror during handshake`);
       };
 
@@ -322,6 +337,7 @@ export class StockfishAnalyzer {
   private currentChess960 = false;
 
   private linesMap = new Map<number, EngineLine>();
+  private pvSanCache = new Map<number, { pvKey: string; pvSan: string[] }>();
   private latestDepth = 0;
   private latestNodes = 0;
   private latestNps = 0;
@@ -459,6 +475,8 @@ export class StockfishAnalyzer {
     this.pendingSyncCount = 0;
     this.currentMultiPv = 1;
     this.currentChess960 = false;
+    this.linesMap.clear();
+    this.pvSanCache.clear();
 
     try {
       dispose?.();
@@ -615,6 +633,7 @@ export class StockfishAnalyzer {
     this.queuedJob = null;
     this.activeJob = job;
     this.linesMap.clear();
+    this.pvSanCache.clear();
     this.latestDepth = 0;
     this.latestNodes = 0;
     this.latestNps = 0;
@@ -752,10 +771,7 @@ export class StockfishAnalyzer {
           this.armSearchTimeout(this.activeJob);
         }
 
-        parsedInfo.pvSan =
-          this.activeJob.chess960 && this.activeJob.chess960Rights
-            ? uciLineToSan960(this.activeJob.fen, this.activeJob.chess960Rights, parsedInfo.pvUci, 10)
-            : uciLineToSan(this.activeJob.fen, parsedInfo.pvUci, 10);
+        // Defer UCI->SAN chess.js conversion to throttled stream emits (and skip entirely for single-eval Game Review)
         if (parsedInfo.multipv <= this.activeJob.multiPv) {
           this.linesMap.set(parsedInfo.multipv, parsedInfo);
         }
@@ -796,7 +812,23 @@ export class StockfishAnalyzer {
 
   private emitUpdate(job: PendingJob, isSearching: boolean) {
     if (!job.onUpdate) return;
-    const sortedLines = Array.from(this.linesMap.values()).sort((a, b) => a.multipv - b.multipv);
+    const sortedLines = Array.from(this.linesMap.values())
+      .sort((a, b) => a.multipv - b.multipv)
+      .map((line) => {
+        const pvKey = line.pvUci.slice(0, 10).join(' ');
+        const cached = this.pvSanCache.get(line.multipv);
+        let pvSan: string[];
+        if (cached && cached.pvKey === pvKey) {
+          pvSan = cached.pvSan;
+        } else {
+          pvSan =
+            job.chess960 && job.chess960Rights
+              ? uciLineToSan960(job.fen, job.chess960Rights, line.pvUci, 10)
+              : uciLineToSan(job.fen, line.pvUci, 10);
+          this.pvSanCache.set(line.multipv, { pvKey, pvSan });
+        }
+        return line.pvSan === pvSan ? line : { ...line, pvSan };
+      });
     const bestFromLine = sortedLines[0]?.pvUci[0] ?? null;
 
     job.onUpdate({

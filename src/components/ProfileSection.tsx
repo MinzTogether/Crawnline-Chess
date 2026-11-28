@@ -1,15 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, ChevronRight, Trash2, Upload } from 'lucide-react';
-import type { SavedMatch, UserProfile } from '../types/preferences';
+import {
+  isValidAvatarDataUrl,
+  MAX_AVATAR_DATA_URL_LENGTH,
+  type SavedMatch,
+  type StorageWriteResult,
+  type UserProfile,
+} from '../types/preferences';
 import { useI18n } from '../i18n/LanguageContext';
 
 const AVATAR_COLORS = ['#81B64C', '#5C9CE6', '#D99B3C', '#26C2A3', '#D96666', '#9C7EE6'];
+const MAX_AVATAR_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-/** Center-crops and compresses an uploaded image file to a 256x256 WebP data URL for localStorage. */
+/** Center-crops and compresses an uploaded image file to a 256x256 WebP/JPEG data URL safe for localStorage. */
 function processAvatarFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
-    if (!file.type.startsWith('image/')) {
-      reject(new Error('Please choose a valid image file (PNG, JPG, WebP, or GIF).'));
+    if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') {
+      reject(new Error('Please choose a valid raster image file (PNG, JPG, WebP, or GIF).'));
+      return;
+    }
+    if (file.size > MAX_AVATAR_UPLOAD_BYTES) {
+      reject(new Error('Image is too large (max 10 MB). Please choose a smaller photo.'));
       return;
     }
     const reader = new FileReader();
@@ -29,14 +40,27 @@ function processAvatarFile(file: File): Promise<string> {
         canvas.height = size;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(src);
+          if (isValidAvatarDataUrl(src)) {
+            resolve(src);
+          } else {
+            reject(new Error('Image could not be compressed safely for local storage.'));
+          }
           return;
         }
         const minSide = Math.min(img.width, img.height);
         const sx = (img.width - minSide) / 2;
         const sy = (img.height - minSide) / 2;
         ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
-        resolve(canvas.toDataURL('image/webp', 0.88));
+
+        let encoded = canvas.toDataURL('image/webp', 0.85);
+        if (!isValidAvatarDataUrl(encoded) || encoded.length > MAX_AVATAR_DATA_URL_LENGTH) {
+          encoded = canvas.toDataURL('image/jpeg', 0.82);
+        }
+        if (!isValidAvatarDataUrl(encoded)) {
+          reject(new Error('Compressed image exceeded safe local storage size limits.'));
+          return;
+        }
+        resolve(encoded);
       };
       img.src = src;
     };
@@ -59,7 +83,7 @@ interface ProfileSectionProps {
   profileInitials: string;
   profileStats: ProfileStatsSummary;
   savedMatches: SavedMatch[];
-  onUpdateProfile: (patch: Partial<UserProfile>) => void;
+  onUpdateProfile: (patch: Partial<UserProfile>) => StorageWriteResult | void;
   onOpenMatchRating: (pgn?: string, title?: string) => void;
 }
 
@@ -74,12 +98,15 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
 }) => {
   const { t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const isMountedRef = useRef(true);
   const toastTimerRef = useRef<number | null>(null);
   const [profileSavedToast, setProfileSavedToast] = useState(false);
   const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (toastTimerRef.current !== null) {
         window.clearTimeout(toastTimerRef.current);
       }
@@ -92,9 +119,15 @@ export const ProfileSection: React.FC<ProfileSectionProps> = ({
     if (!file) return;
     try {
       const dataUrl = await processAvatarFile(file);
-      onUpdateProfile({ avatarImage: dataUrl });
+      if (!isMountedRef.current) return;
+      const writeResult = onUpdateProfile({ avatarImage: dataUrl });
+      if (writeResult && !writeResult.ok && writeResult.error === 'quota_exceeded') {
+        setAvatarUploadError('Browser storage is full — could not save photo. Your existing profile and matches are safe.');
+        return;
+      }
       setAvatarUploadError(null);
     } catch (err) {
+      if (!isMountedRef.current) return;
       setAvatarUploadError(err instanceof Error ? err.message : 'Failed to upload image.');
     }
   };
