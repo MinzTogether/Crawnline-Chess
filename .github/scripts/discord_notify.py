@@ -18,21 +18,20 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-VERSION = "3.0.1"
+VERSION = "3.0.2"
 BOT_NAME = "Crawnline Chess"
 OWN_WORKFLOW_NAME = "Crawn Discord Monitor"
+RELEASES_URL = "https://github.com/MinzTogether/Crawnline-Chess/releases"
 
 # Discord embed limits are: title 256, description 4096, field name 256,
 # field value 1024, 25 fields and 6000 characters in total. We stay below them.
 EMBED_TOTAL_LIMIT = 5800
-MAX_FIELDS = 10
+MAX_FIELDS = 24  # Reserve the 25th Discord field for the Releases link.
 FIELD_NAME_LIMIT = 250
 FIELD_VALUE_LIMIT = 1000
 DESCRIPTION_LIMIT = 1800
-DIFF_PREVIEW_LIMIT = 450
-MAX_DIFF_FILES = 4
-MAX_DIFF_SOURCE_BYTES = 256 * 1024
-MAX_COMMITS_LISTED = 6
+MAX_FILE_PATH_LENGTH = 180
+FILE_LIST_VALUE_LIMIT = 820
 
 BLURPLE, GREEN, RED = 0x5865F2, 0x57F287, 0xED4245
 YELLOW, PURPLE, GREY = 0xFEE75C, 0x9B59B6, 0x95A5A6
@@ -118,27 +117,6 @@ _SECRET_RULES = [
      r"\1\2[REDACTED]"),
 ]
 
-_SENSITIVE_PATH_RULES = [re.compile(p, re.I) for p in (
-    r"(^|/)\.env(\.|$)",
-    r"(^|/)\.(npmrc|pypirc|netrc|htpasswd|git-credentials|envrc)$",
-    r"(^|/)id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$",
-    r"\.(pem|key|p8|p12|pfx|ppk|jks|keystore|kdbx|ovpn|mobileprovision|tfvars|tfstate|gpg)$",
-    r"secret|credential|private[_-]?key|passw(or)?d",
-    r"(^|/)(kubeconfig|service[-_]?account[^/]*\.json)$",
-    r"(^|/)\.ssh/",
-    r"(^|/)\.aws/credentials$",
-    r"(^|/)\.docker/config\.json$",
-    r"(^|/)application_default_credentials\.json$",
-)]
-
-_NOISY_PATH = re.compile(
-    r"(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Pipfile\.lock|"
-    r"Cargo\.lock|composer\.lock|Gemfile\.lock|go\.sum|uv\.lock|bun\.lockb?|"
-    r"npm-shrinkwrap\.json)$|\.min\.(js|css)$|\.map$",
-    re.I,
-)
-
-
 def redact(value):
     value = str(value)
     # Strip terminal control sequences and non-printing controls before embedding.
@@ -147,10 +125,6 @@ def redact(value):
     for pattern, replacement in _SECRET_RULES:
         value = pattern.sub(replacement, value)
     return value
-
-
-def is_sensitive_path(path):
-    return any(rule.search(path) for rule in _SENSITIVE_PATH_RULES)
 
 
 # --------------------------------------------------------------------------
@@ -324,62 +298,48 @@ def list_changes(mode, base, after):
     return parse_name_status(out)
 
 
-def count_commits(mode, base, after, fallback):
-    if mode == "range":
-        try:
-            return int(git("rev-list", "--count", f"{base}..{after}").strip())
-        except (GitError, ValueError):
-            pass
-    return fallback
-
-
-def tidy_diff(raw):
-    lines = raw.splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith("@@"):
-            return "\n".join(lines[index:])
-    if any(l.startswith(("Binary files", "GIT binary patch")) for l in lines):
-        return "[Binary file changed]"
-    return "[No text changes to display]"
-
-
-def blob_size(revision, path):
-    """Return a blob size, or None when the path does not exist at that revision."""
-    if not revision or not path:
-        return None
-    try:
-        return int(git("cat-file", "-s", f"{revision}:{path}").strip())
-    except (GitError, ValueError, subprocess.TimeoutExpired, OSError):
-        return None
-
-
-def file_diff(mode, base, after, change):
-    paths = [p for p in (change.path, change.old_path) if p]
-    if any(is_sensitive_path(path) for path in paths):
-        return "[Diff preview hidden for a potentially sensitive file.]"
-    if any(_NOISY_PATH.search(path) for path in paths):
-        return "[Diff preview skipped for a lockfile or generated file.]"
-
-    # Never load very large blobs into memory just to create a short Discord preview.
-    revisions = [(after, change.path)]
-    if mode == "range":
-        revisions.append((base, change.old_path or change.path))
-    elif change.kind == "D":
-        revisions = [(after, change.path)]
-    for revision, path in revisions:
-        size = blob_size(revision, path)
-        if size is not None and size > MAX_DIFF_SOURCE_BYTES:
-            return "[Diff preview skipped because the file is too large. Open the comparison link to inspect it.]"
-
-    try:
-        common = ["--no-ext-diff", "--no-textconv", "--no-color", "--find-renames", "--unified=2"]
-        if mode == "range":
-            out = git("diff", *common, base, after, "--", *paths)
+def file_change_groups(changes):
+    """Group Git name-status changes into the three labels used in Discord."""
+    groups = {"ADDED": [], "MODIFIED": [], "DELETED": []}
+    for change in changes:
+        kind = (change.kind or "").upper()[:1]
+        if kind in ("A", "C"):
+            label = "ADDED"
+            path = change.path
+        elif kind == "D":
+            label = "DELETED"
+            path = change.path
+        elif kind == "R":
+            label = "MODIFIED"
+            path = f"{change.old_path} → {change.path}" if change.old_path else change.path
         else:
-            out = git("show", "--format=", *common, after, "--", *paths)
-    except (GitError, subprocess.TimeoutExpired, OSError):
-        return "[Diff preview is unavailable. Open the comparison link to inspect the changes.]"
-    return tidy_diff(out.strip())
+            # Modified, type-changed, unmerged and other non-add/delete states
+            # are presented in the simpler user-facing MODIFIED category.
+            label = "MODIFIED"
+            path = change.path
+        if path:
+            groups[label].append(path)
+    return groups
+
+
+def format_file_list(paths):
+    """Format file names only and report overflow without showing source code."""
+    lines = []
+    for path in paths:
+        cleaned = safe_text(path, MAX_FILE_PATH_LENGTH)
+        cleaned = cleaned.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+        # Keep each path readable even if the filename itself contains a backtick.
+        cleaned = cleaned.replace("`", "`\u200b")
+        line = f"• `{cleaned}`"
+        candidate = "\n".join(lines + [line])
+        if len(candidate) > FILE_LIST_VALUE_LIMIT:
+            break
+        lines.append(line)
+
+    omitted = len(paths) - len(lines)
+    if omitted:
+        lines.append(f"… and {omitted} more file(s); open the comparison link above.")
+    return "\n".join(lines) or "—"
 
 
 # --------------------------------------------------------------------------
@@ -438,84 +398,56 @@ def handles(*event_names):
 def handle_push(n, event):
     ref_name, ref_kind = describe_ref(event.get("ref"))
     after = event.get("after") or n.env.get("GITHUB_SHA", "")
-    flags = [f for f, on in (("new " + ref_kind, event.get("created")),
-                             ("force push", event.get("forced")),
-                             ("deleted", event.get("deleted"))) if on]
-    n.line("Ref", f"`{ref_name}` ({ref_kind})" + (f" — {', '.join(flags)}" if flags else ""))
+    n.line("Branch / Tag", f"`{ref_name}` ({ref_kind})")
+
+    if event.get("created"):
+        # GitHub also fires a dedicated create event for a newly created ref.
+        n.link = safe_url(dig(event, "head_commit", "url"), n.repo_url)
+        n.add("File Changes", "No file list for a newly created reference.")
+        return
 
     if event.get("deleted"):
         n.color, n.link = RED, n.repo_url
         return
 
-    n.line("Commit", f"`{after[:12]}`")
     if event.get("ref") == "refs/heads/main":
         # skip_reason() permits this event only when the complete build job
         # result is success, so do not construct failure/cancelled cards here.
         build_result = (n.env.get("CRAWN_BUILD_RESULT") or "").lower()
         if build_result == "success":
-            n.add("Main Build", "Success", inline=True)
             n.color = GREEN
-    head = event.get("head_commit") or {}
-    commits = event.get("commits") or []
-    n.link = event.get("compare") if not event.get("created") else head.get("url")
-    n.link = n.link or head.get("url") or f"{n.repo_url}/commit/{after}"
+    n.link = safe_url(event.get("compare"), f"{n.repo_url}/commit/{after}")
 
     analysis_note = None
     try:
         mode, base, resolved_after = resolve_range(event)
         changes = list_changes(mode, base, resolved_after)
-        total = count_commits(mode, base, resolved_after, len(commits))
     except (GitError, subprocess.TimeoutExpired, OSError) as error:
         mode, base, resolved_after, changes = None, "", after, []
-        total = len(commits)
-        analysis_note = (f"File analysis is unavailable: {clip(first_line(error), 150)}. "
-                         "Open the comparison link instead.")
-
-    # Commit list
-    lines = []
-    for commit in commits[:MAX_COMMITS_LISTED]:
-        author = dig(commit, "author", "username") or dig(commit, "author", "name") or "unknown"
-        subject = escape_md(clip(first_line(commit.get("message")), 70)) or "(no message)"
-        url = safe_url(commit.get("url"))
-        sha = f"`{short_sha(commit.get('id'))}`"
-        lines.append(f"{f'[{sha}]({url})' if url else sha} {subject} — {escape_md(author)}")
-    if total > len(lines) and lines:
-        lines.append(f"…and {total - len(lines)} more commit(s)")
-    if not lines and head.get("message"):
-        lines.append(escape_md(clip(first_line(head["message"]), 120)))
-    if commits:
-        n.add(f"Commits ({total})", "\n".join(lines))
-    else:
-        n.add("Latest Commit", "\n".join(lines) or "No commit information")
+        analysis_note = (f"Unable to retrieve the file list ({clip(first_line(error), 120)}). "
+                         "Open the comparison link above.")
 
     if mode is None:
-        n.add("File Analysis", analysis_note)
+        n.add("File Changes", analysis_note)
         return
 
-    counts = collections.Counter(c.kind for c in changes)
     if mode == "none":
-        n.add("File Change Summary", "No new file changes (the ref points to an existing commit).")
+        n.add("File Changes", "No file changes detected.")
         return
-    n.add("File Change Summary",
-          f"🆕 Added: {counts['A'] + counts['C']}\n"
-          f"✏️ Modified: {counts['M'] + counts['T']}\n"
-          f"🗑️ Deleted: {counts['D']}\n"
-          f"🔀 Renamed: {counts['R']}")
 
-    # Prefer files whose diff is useful; lockfiles and generated files go last.
-    ordered = sorted(changes, key=lambda c: bool(_NOISY_PATH.search(c.path)))
-    labels = {"A": "🆕 ADDED", "M": "✏️ MODIFIED", "D": "🗑️ DELETED",
-              "R": "🔀 RENAMED", "C": "🆕 COPIED", "T": "✏️ TYPE CHANGED"}
-    for change in ordered[:MAX_DIFF_FILES]:
-        label = labels.get(change.kind, f"📄 {change.kind}")
-        shown = f"{change.old_path} → {change.path}" if change.old_path else change.path
-        shown = escape_md(clip(shown, 200))
-        preview = safe_text(file_diff(mode, base, resolved_after, change), DIFF_PREVIEW_LIMIT)
-        n.add(f"{label} | {shown}", fence(preview, "diff"))
-    if len(changes) > MAX_DIFF_FILES:
-        n.add("Additional Files",
-              f"{len(changes) - MAX_DIFF_FILES} additional file(s) changed. "
-              "Open the comparison link to view the complete change list.")
+    groups = file_change_groups(changes)
+    labels = {
+        "ADDED": "🆕 ADDED",
+        "MODIFIED": "✏️ MODIFIED",
+        "DELETED": "🗑️ DELETED",
+    }
+    any_changes = False
+    for key in ("ADDED", "MODIFIED", "DELETED"):
+        if groups[key]:
+            any_changes = True
+            n.add(labels[key], format_file_list(groups[key]), limit=FIELD_VALUE_LIMIT)
+    if not any_changes:
+        n.add("File Changes", "No file changes detected.")
 
 
 @handles("create", "delete")
@@ -857,12 +789,20 @@ def build_payload(event_name, event, env):
     n.line("Action", f"`{n.action}`" if n.action else None)
     HANDLERS.get(event_name, handle_generic)(n, event)
 
+    # Always keep the Releases link as the final field in every notification.
+    fields = list(n.fields)
+    fields.append({
+        "name": "📦 Releases",
+        "value": f"[View all Crawnline Chess releases]({RELEASES_URL})",
+        "inline": False,
+    })
+
     embed = {
         "title": clip(EVENT_TITLES.get(event_name, "📡 Repository Activity"), 256),
         "url": safe_url(n.link, n.repo_url),
         "description": safe_text("\n".join(n.lines), DESCRIPTION_LIMIT),
         "color": n.color if n.color is not None else EVENT_COLORS.get(event_name, BLURPLE),
-        "fields": n.fields,
+        "fields": fields,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "footer": {"text": f"{BOT_NAME} • {event_name}"},
         "author": {"name": clip(sender, 256), "url": f"{n.server}/{urllib.parse.quote(sender)}"},
@@ -876,8 +816,9 @@ def build_payload(event_name, event, env):
         return (len(embed["title"]) + len(embed["description"]) + len(embed["footer"]["text"])
                 + len(embed["author"]["name"])
                 + sum(len(f["name"]) + len(f["value"]) for f in embed["fields"]))
-    while embed["fields"] and size() > EMBED_TOTAL_LIMIT:
-        embed["fields"].pop()
+    # Drop the least essential event fields first, preserving the Releases link.
+    while len(embed["fields"]) > 1 and size() > EMBED_TOTAL_LIMIT:
+        embed["fields"].pop(-2)
 
     payload = {"username": BOT_NAME, "embeds": [embed], "allowed_mentions": {"parse": []}}
     validate_payload(payload)
@@ -920,6 +861,11 @@ def fallback_payload(event_name, env, reason):
             "color": GREY,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "footer": {"text": f"{BOT_NAME} • {event_name}"},
+            "fields": [{
+                "name": "📦 Releases",
+                "value": f"[View all Crawnline Chess releases]({RELEASES_URL})",
+                "inline": False,
+            }],
         }],
         "allowed_mentions": {"parse": []},
     }

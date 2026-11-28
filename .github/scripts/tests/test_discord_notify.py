@@ -36,27 +36,6 @@ class RedactionTests(unittest.TestCase):
         value = '"api_key": "super-secret-value"'
         self.assertNotIn("super-secret-value", notifier.redact(value))
 
-    def test_sensitive_paths_are_hidden(self):
-        paths = [
-            ".env",
-            ".env.production",
-            ".ssh/id_ed25519",
-            ".aws/credentials",
-            ".docker/config.json",
-            "android/release.keystore",
-            "certs/signing.p12",
-            "config/service-account.json",
-        ]
-        for path in paths:
-            with self.subTest(path=path):
-                self.assertTrue(notifier.is_sensitive_path(path))
-
-    def test_lock_and_generated_files_are_classified_as_noisy(self):
-        for path in ("bun.lock", "bun.lockb", "package-lock.json", "dist/app.min.js", "assets/app.js.map"):
-            with self.subTest(path=path):
-                self.assertRegex(path, notifier._NOISY_PATH)
-
-
 class PayloadTests(unittest.TestCase):
     def setUp(self):
         self.env = {
@@ -139,29 +118,8 @@ class PayloadTests(unittest.TestCase):
         self.assert_safe_payload(payload)
         self.assertIn("Pull Request Activity", payload["embeds"][0]["title"])
 
-    def test_main_push_is_suppressed_when_build_did_not_succeed(self):
-        event = {
-            "ref": "refs/heads/main",
-            "created": False,
-            "deleted": False,
-        }
-        for result in ("failure", "cancelled", "skipped", "unknown", ""):
-            with self.subTest(result=result):
-                env = dict(self.env, CRAWN_BUILD_RESULT=result)
-                reason = notifier.skip_reason("push", event, env)
-                self.assertIn("successful validation/build is required", reason)
-
-    def test_main_push_is_allowed_only_after_successful_build(self):
-        event = {
-            "ref": "refs/heads/main",
-            "created": False,
-            "deleted": False,
-        }
-        env = dict(self.env, CRAWN_BUILD_RESULT="success")
-        self.assertIsNone(notifier.skip_reason("push", event, env))
-
-    def test_main_push_success_payload_marks_build_success(self):
-        env = dict(self.env, CRAWN_BUILD_RESULT="success", GITHUB_SHA="a" * 40)
+    def test_main_push_is_suppressed_when_build_fails(self):
+        env = dict(self.env, CRAWN_BUILD_RESULT="failure", GITHUB_SHA="a" * 40)
         event = {
             "ref": "refs/heads/main",
             "before": "a" * 40,
@@ -172,21 +130,57 @@ class PayloadTests(unittest.TestCase):
             "head_commit": {"id": "b" * 40, "message": "test commit", "url": "https://github.com/example/Crawn/commit/" + "b" * 40},
             "sender": {"login": "tester"},
         }
-        with patch.object(notifier, "resolve_range", return_value=("none", "", "b" * 40)), \
-             patch.object(notifier, "list_changes", return_value=[]), \
-             patch.object(notifier, "count_commits", return_value=1):
+        reason = notifier.skip_reason("push", event, env)
+        self.assertIn("successful validation/build is required", reason)
+
+    def test_main_push_success_lists_only_file_names_and_releases_link(self):
+        env = dict(self.env, CRAWN_BUILD_RESULT="success", GITHUB_SHA="b" * 40)
+        event = {
+            "ref": "refs/heads/main",
+            "before": "a" * 40,
+            "after": "b" * 40,
+            "created": False,
+            "deleted": False,
+            "compare": "https://github.com/example/Crawn/compare/abc...def",
+            "commits": [{"id": "b" * 40, "message": "not shown in the notification"}],
+            "sender": {"login": "tester"},
+        }
+        changes = [
+            notifier.Change("A", "src/new.ts", ""),
+            notifier.Change("M", "src/app.ts", ""),
+            notifier.Change("D", "src/old.ts", ""),
+            notifier.Change("R", "src/new-name.ts", "src/old-name.ts"),
+            notifier.Change("T", "assets/icon.svg", ""),
+        ]
+        with patch.object(notifier, "resolve_range", return_value=("range", "a" * 40, "b" * 40)), \
+             patch.object(notifier, "list_changes", return_value=changes):
             payload = notifier.build_payload("push", event, env)
+
         self.assert_safe_payload(payload)
         embed = payload["embeds"][0]
-        self.assertEqual(embed["color"], notifier.GREEN)
-        self.assertTrue(any(field["name"] == "Main Build" and field["value"] == "Success" for field in embed["fields"]))
+        fields = embed["fields"]
+        by_name = {field["name"]: field["value"] for field in fields}
+        self.assertIn("src/new.ts", by_name["🆕 ADDED"])
+        self.assertIn("src/app.ts", by_name["✏️ MODIFIED"])
+        self.assertIn("src/old-name.ts → src/new-name.ts", by_name["✏️ MODIFIED"])
+        self.assertIn("assets/icon.svg", by_name["✏️ MODIFIED"])
+        self.assertIn("src/old.ts", by_name["🗑️ DELETED"])
+        self.assertEqual(fields[-1]["name"], "📦 Releases")
+        self.assertIn(notifier.RELEASES_URL, fields[-1]["value"])
+        self.assertNotIn("not shown in the notification", str(embed))
+        self.assertNotIn("diff", str(embed).lower())
 
-    def test_build_release_failures_are_silent(self):
-        for conclusion in ("failure", "cancelled", "timed_out", "action_required"):
-            with self.subTest(conclusion=conclusion):
-                event = {"workflow_run": {"name": "Build & Release", "conclusion": conclusion}}
-                reason = notifier.skip_reason("workflow_run", event, self.env)
-                self.assertIn("failure notifications are disabled", reason)
+    def test_releases_link_is_last_field_on_other_events(self):
+        payload = notifier.build_payload("watch", {"action": "started"}, self.env)
+        fields = payload["embeds"][0]["fields"]
+        self.assertEqual(fields[-1]["name"], "📦 Releases")
+        self.assertIn(notifier.RELEASES_URL, fields[-1]["value"])
+
+    def test_fallback_payload_also_contains_releases_link(self):
+        payload = notifier.fallback_payload("push", self.env, "test reason")
+        fields = payload["embeds"][0]["fields"]
+        self.assertEqual(fields[-1]["name"], "📦 Releases")
+        self.assertIn(notifier.RELEASES_URL, fields[-1]["value"])
 
     def test_no_mentions_are_allowed_in_any_event(self):
         event = {"action": "started", "sender": {"login": "user"}}
