@@ -1,37 +1,133 @@
-name: Discord Notify
+name: Crawn Discord Monitor
 
 on:
+  # Commit monitoring across branches and tags.
   push:
     branches:
-      - main
+      - "**"
+    tags:
+      - "**"
+  create:
+  delete:
+
+  # pull_request_target is used so fork PRs can be announced. The notifier
+  # checks out trusted base-branch code only; it never checks out PR code.
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - closed
+      - ready_for_review
+      - converted_to_draft
+      - assigned
+      - unassigned
+      - labeled
+      - unlabeled
+      - locked
+      - unlocked
+      - review_requested
+      - review_request_removed
+      - milestoned
+      - demilestoned
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+  issues:
+    types:
+      - opened
+      - edited
+      - closed
+      - reopened
+      - assigned
+      - unassigned
+      - labeled
+      - unlabeled
+      - deleted
+      - transferred
+      - locked
+      - unlocked
+      - milestoned
+      - demilestoned
+  issue_comment:
+    types: [created, edited, deleted]
+
+  release:
+    types: [published, edited, deleted]
+  fork:
+  watch:
+    types: [started]
+
+  discussion:
+    types:
+      - created
+      - edited
+      - deleted
+      - transferred
+      - pinned
+      - unpinned
+      - labeled
+      - unlabeled
+      - locked
+      - unlocked
+      - category_changed
+      - answered
+      - unanswered
+  discussion_comment:
+    types: [created, edited, deleted]
+
+  # A successful Build & Release run gets Crawn's dedicated release card.
   workflow_run:
     workflows:
       - "Build & Release"
-    types:
-      - completed
+    types: [completed]
+
+  workflow_dispatch:
+  member:
+    types: [added, edited, deleted]
+  public:
+  milestone:
+    types: [created, opened, edited, closed, deleted]
+  label:
+    types: [created, edited, deleted]
+  branch_protection_rule:
+    types: [created, edited, deleted]
+  deployment:
+  deployment_status:
+  repository_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # Keep Crawn's existing main-branch validation pipeline intact.
   build:
-    if: github.event_name == 'push' && !github.event.deleted
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !github.event.deleted
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - uses: oven-sh/setup-bun@v2
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck
+      - name: Typecheck and lint
         run: bun run lint
 
       - name: Unit tests
@@ -40,82 +136,134 @@ jobs:
       - name: Build
         run: bun run build
 
-  notify-commit:
-    if: github.event_name == 'push'
-    needs: build
+  notify:
+    name: Send Discord Notification
+    needs: [build]
+    # Main-branch push notifications are sent only after every validation/build
+    # step succeeds. Other repository events remain independent of this job.
+    if: >-
+      always() &&
+      !github.event.deleted &&
+      (
+        (
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          needs.build.result == 'success'
+        ) ||
+        github.event_name != 'push' ||
+        github.ref != 'refs/heads/main'
+      )
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
-      - name: Send commit notification
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      - name: Check out full history for push analysis
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out trusted default-branch notifier
+        if: github.event_name != 'push'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate notifier and run unit tests
         run: |
-          set -euo pipefail
-
-          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
-            echo "::error::Missing DISCORD_WEBHOOK_URL repository secret"
-            exit 1
+          python -m py_compile .github/scripts/discord_notify.py
+          if [ -d .github/scripts/tests ]; then
+            python -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
+          else
+            echo "::warning::Notifier tests were not found in this branch; syntax check passed, skipping unit tests."
           fi
 
-          if [ "$(jq '.commits | length' "$GITHUB_EVENT_PATH")" -eq 0 ]; then
-            echo "No commits in this push, skipping"
-            exit 0
-          fi
+      - name: Send notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          CRAWN_BUILD_RESULT: ${{ needs.build.result }}
+        run: python .github/scripts/discord_notify.py
 
-          jq '
-            def trunc($n): if length > $n then .[0:$n - 1] + "…" else . end;
-            def esc: gsub("(?<c>[\\\\`*_~|\\[\\]<>])"; "\\" + .c);
-            (.commits | length) as $count
-            | (.ref | sub("^refs/heads/"; "")) as $branch
-            | {
-                username: "Crawnline Chess",
-                allowed_mentions: {parse: []},
-                embeds: [{
-                  author: {name: .sender.login, icon_url: .sender.avatar_url, url: .sender.html_url},
-                  title: ("[\(.repository.name):\($branch)] \($count) new commit\(if $count == 1 then "" else "s" end)" | trunc(256)),
-                  url: (if $count == 1 then .head_commit.url else .compare end),
-                  description: ((.commits[0:10] | map("[`\(.id[0:7])`](\(.url)) \(.message | split("\n")[0] | trunc(72) | esc) - \(.author.name | esc)") | join("\n")) + (if $count > 10 then "\n…and \($count - 10) more" else "" end)),
-                  color: 5793266,
-                  fields: [
-                    {name: "Releases", value: "[Open releases page](\(.repository.html_url)/releases)", inline: false}
-                  ],
-                  timestamp: .head_commit.timestamp,
-                  footer: {text: .repository.full_name}
-                }]
-              }
-          ' "$GITHUB_EVENT_PATH" > payload.json
-
-          curl -fsS --retry 3 \
-            -H "Content-Type: application/json" \
-            --data-binary @payload.json \
-            "$DISCORD_WEBHOOK_URL"
-
+  # Build & Release notifications stay separate from the generic workflow card.
   notify-release:
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.name == 'Build & Release' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Send release notification
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          TAG: ${{ github.event.workflow_run.head_branch }}
+          TAG_HINT: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
 
-          if [ -z "${DISCORD_WEBHOOK_URL}" ]; then
-            echo "::error::Missing DISCORD_WEBHOOK_URL repository secret"
-            exit 1
-          fi
-
-          if ! gh release view "$TAG" \
-            --json tagName,name,url,body,isDraft,isPrerelease,publishedAt,targetCommitish \
-            > release.json 2> /dev/null; then
-            echo "No release found for '$TAG', skipping"
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL is not configured; release notification skipped."
             exit 0
           fi
 
-          if [ "$(jq -r '.isDraft' release.json)" = "true" ]; then
-            echo "Release is a draft, skipping"
+          if ! [[ "$DISCORD_WEBHOOK_URL" =~ ^https://(ptb\.|canary\.)?discord(app)?\.com/api/(v[0-9]+/)?webhooks/[0-9]+/[A-Za-z0-9_-]+/?(\?.*)?$ ]]; then
+            echo "::error::DISCORD_WEBHOOK_URL is not a valid Discord webhook URL."
+            exit 1
+          fi
+
+          TAG="${TAG_HINT:-}"
+          RELEASE_FILE="release.json"
+          RELEASE_FOUND="false"
+
+          # Accept the hinted tag only when it resolves to this workflow run's
+          # commit. This avoids announcing an unrelated release with the same name.
+          if [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$ ]] && [[ "$TAG" != *".."* ]] && \
+            gh release view "$TAG" \
+              --json tagName,name,url,body,isDraft,isPrerelease,publishedAt,targetCommitish \
+              > "$RELEASE_FILE" 2>/dev/null; then
+            TAG_SHA="$(gh api "repos/${GH_REPO}/commits/${TAG}" --jq '.sha' 2>/dev/null || true)"
+            if [ -z "$HEAD_SHA" ] || [ "$TAG_SHA" = "$HEAD_SHA" ]; then
+              RELEASE_FOUND="true"
+            fi
+          fi
+
+          # Some workflow_run payloads contain a branch name rather than a tag.
+          # Match published release tags by the exact commit SHA as a fallback.
+          if [ "$RELEASE_FOUND" != "true" ]; then
+            TAG=""
+            CANDIDATES="$(gh release list --limit 100 --json tagName,isDraft \
+              --jq '.[] | select(.isDraft == false) | .tagName' 2>/dev/null || true)"
+            while IFS= read -r candidate; do
+              [[ "$candidate" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$ ]] || continue
+              [[ "$candidate" != *".."* ]] || continue
+              candidate_sha="$(gh api "repos/${GH_REPO}/commits/${candidate}" --jq '.sha' 2>/dev/null || true)"
+              if [ -n "$HEAD_SHA" ] && [ "$candidate_sha" = "$HEAD_SHA" ]; then
+                TAG="$candidate"
+                break
+              fi
+            done <<< "$CANDIDATES"
+
+            if [ -z "$TAG" ]; then
+              echo "No published release matches this successful Build & Release run; skipping."
+              exit 0
+            fi
+
+            gh release view "$TAG" \
+              --json tagName,name,url,body,isDraft,isPrerelease,publishedAt,targetCommitish \
+              > "$RELEASE_FILE"
+          fi
+
+          if [ "$(jq -r '.isDraft // false' "$RELEASE_FILE")" = "true" ]; then
+            echo "Release is a draft; skipping."
             exit 0
           fi
 
@@ -133,16 +281,18 @@ jobs:
                   color: (if $r.isPrerelease then 16705372 else 5763719 end),
                   fields: [
                     {name: "Tag", value: ("`" + $r.tagName + "`"), inline: true},
-                    {name: "Target", value: ("`" + $r.targetCommitish + "`"), inline: true},
-                    {name: "Releases", value: "[View this release](\($r.url)) • [All releases](\($releases))", inline: false}
+                    {name: "Target", value: ("`" + ($r.targetCommitish // "unknown") + "`"), inline: true},
+                    {name: "Links", value: "[Open release](\($r.url)) • [All releases](\($releases))", inline: false}
                   ],
-                  timestamp: $r.publishedAt,
+                  timestamp: ($r.publishedAt // now | tostring),
                   footer: {text: $repo}
                 }]
               }
-          ' release.json > payload.json
+          ' "$RELEASE_FILE" > payload.json
 
-          curl -fsS --retry 3 \
+          jq -e . payload.json > /dev/null
+          curl --fail --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-max-time 30 --max-time 25 \
             -H "Content-Type: application/json" \
             --data-binary @payload.json \
             "$DISCORD_WEBHOOK_URL"
